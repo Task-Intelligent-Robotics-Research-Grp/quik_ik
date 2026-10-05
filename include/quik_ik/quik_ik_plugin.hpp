@@ -1,105 +1,167 @@
+// BSD 3-Clause License
+//
+// Copyright (c) 2023, National Institute of Industrial Science
+// and Technology(AIST)
+//
+// Redistribution and use in source and binary forms, with or without
+// modification, are permitted provided that the following conditions are met:
+//
+// 1. Redistributions of source code must retain the above copyright notice,
+//    this list of conditions and the following disclaimer.
+//
+// 2. Redistributions in binary form must reproduce the above copyright notice,
+//    this list of conditions and the following disclaimer in the documentation
+//    and/or other materials provided with the distribution.
+//
+// 3. Neither the name of the copyright holder nor the names of its
+//    contributors may be used to endorse or promote products derived from
+//    this software without specific prior written permission.
+//
+// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS
+// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY,
+// OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT
+// OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+// OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
+// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
+// EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+//
+// Author: Toshio Ueshiba (t.ueshiba@aist.go.jp)
+//
 #pragma once
 
-#include <quik_ik/robot.hpp>
+#include <quik/Robot.hpp>
+#include <quik/IKSolver.hpp>
 #include <moveit/kinematics_base/kinematics_base.h>
 
 namespace quik_ik
 {
 class ParamListener;
 
+/************************************************************************
+*  class QuikIKPlugin                                                   *
+************************************************************************/
 class QuikIKPlugin : public kinematics::KinematicsBase
 {
+  private:
+    using pose_t        = geometry_msgs::msg::Pose;
+    using joint_model_t = moveit::core::JointModel;
+    using robot_model_t = moveit::core::RobotModel;
+    using robot_state_t = moveit::core::RobotState;
+    using error_code_t  = moveit_msgs::msg::MoveItErrorCodes;
+    using options_t     = kinematics::KinematicsQueryOptions;
+
+    using dh_params_t   = Eigen::Array<double, Eigen::Dynamic, 4>;
+    using link_type_t   = quik::JOINTTYPE_t;
+    using link_types_t  = Eigen::VectorX<link_type_t>;
+    using qsign_t       = Eigen::VectorXd;
+    using transform_t   = Eigen::Isometry3d;
+    using vector3_t     = Eigen::Vector3d;
+    using robot_t       = quik::Robot<>;
+
+    struct dh_param_t
+    {
+        double  a       = 0.0;
+        double  alpha   = 0.0;
+        double  lambda  = 0.0;
+        double  mu      = 0.0;
+    };
+    
   public:
-    virtual bool initialize(rclcpp::Node::SharedPtr const& node,
-                            moveit::core::RobotModel const& robot_model,
-                            std::string const& group_name,
-                            std::string const& base_frame,
-                            std::vector<std::string> const& tip_frames,
-                            double search_discretization);
+    QuikIKPlugin()                                                      ;
+    ~QuikIKPlugin()                                                     ;
+    
+    const std::vector<std::string>& getJointNames()             const   ;
+    const std::vector<std::string>& getLinkNames()              const   ;
 
-    virtual bool searchPositionIK(
-        std::vector<geometry_msgs::msg::Pose> const& ik_poses,
-        std::vector<double> const& ik_seed_state,
-        double timeout,
-        std::vector<double> const&,
-        std::vector<double>& solution,
-        IKCallbackFn const& solution_callback,
-        IKCostFn const& cost_function,
-        moveit_msgs::msg::MoveItErrorCodes& error_code,
-        kinematics::KinematicsQueryOptions const& options = kinematics::KinematicsQueryOptions(),
-        moveit::core::RobotState const* context_state = nullptr) const;
+    bool initialize(const rclcpp::Node::SharedPtr& node,
+                    const robot_model_t& robot_model,
+                    const std::string& group_name,
+                    const std::string& base_frame,
+                    const std::vector<std::string>& tip_frames,
+                    double search_discretization)                       ;
 
-    virtual std::vector<std::string> const& getJointNames() const;
+    bool getPositionFK(const std::vector<std::string>&,
+                       const std::vector<double>&,
+                       std::vector<pose_t>&)                    const   ;
 
-    virtual std::vector<std::string> const& getLinkNames() const;
+    bool getPositionIK(const pose_t&,
+                       const std::vector<double>&,
+                       std::vector<double>&,
+                       error_code_t&,
+                       const options_t&)                        const   ;
 
-    virtual bool getPositionFK(std::vector<std::string> const&,
-                               std::vector<double> const&,
-                               std::vector<geometry_msgs::msg::Pose>&) const;
+    bool searchPositionIK(const std::vector<pose_t>& ik_poses,
+                          const std::vector<double>& ik_seed_state,
+                          double timeout,
+                          const std::vector<double>&,
+                          std::vector<double>& solution,
+                          const IKCallbackFn& solution_callback,
+                          const IKCostFn& cost_function,
+                          error_code_t& error_code,
+                          const options_t& options = options_t(),
+                          const robot_state_t* context_state=nullptr) const;
 
-    virtual bool getPositionIK(geometry_msgs::msg::Pose const&,
-                               std::vector<double> const&,
-                               std::vector<double>&,
-                               moveit_msgs::msg::MoveItErrorCodes&,
-                               kinematics::KinematicsQueryOptions const&) const;
+    bool searchPositionIK(const pose_t& ik_pose,
+                          const std::vector<double>& ik_seed_state,
+                          double timeout,
+                          std::vector<double>& solution,
+                          error_code_t& error_code,
+                          const options_t& options=options_t()) const   ;
 
-    virtual bool searchPositionIK(geometry_msgs::msg::Pose const& ik_pose,
-                                  std::vector<double> const& ik_seed_state,
-                                  double timeout,
-                                  std::vector<double>& solution,
-                                  moveit_msgs::msg::MoveItErrorCodes& error_code,
-                                  kinematics::KinematicsQueryOptions const& options =
-                                      kinematics::KinematicsQueryOptions()) const;
+    bool searchPositionIK(const pose_t& ik_pose,
+                          const std::vector<double>& ik_seed_state,
+                          double timeout,
+                          const std::vector<double>& consistency_limits,
+                          std::vector<double>& solution,
+                          error_code_t& error_code,
+                          const options_t& options=options_t()) const   ;
 
-    virtual bool searchPositionIK(geometry_msgs::msg::Pose const& ik_pose,
-                                  std::vector<double> const& ik_seed_state,
-                                  double timeout,
-                                  std::vector<double> const& consistency_limits,
-                                  std::vector<double>& solution,
-                                  moveit_msgs::msg::MoveItErrorCodes& error_code,
-                                  kinematics::KinematicsQueryOptions const& options =
-                                      kinematics::KinematicsQueryOptions()) const;
+    bool searchPositionIK(const pose_t& ik_pose,
+                          const std::vector<double>& ik_seed_state,
+                          double timeout,
+                          std::vector<double>& solution,
+                          const IKCallbackFn& solution_callback,
+                          error_code_t& error_code,
+                          const options_t& options=options_t()) const   ;
 
-    virtual bool searchPositionIK(geometry_msgs::msg::Pose const& ik_pose,
-                                  std::vector<double> const& ik_seed_state,
-                                  double timeout,
-                                  std::vector<double>& solution,
-                                  IKCallbackFn const& solution_callback,
-                                  moveit_msgs::msg::MoveItErrorCodes& error_code,
-                                  kinematics::KinematicsQueryOptions const& options =
-                                      kinematics::KinematicsQueryOptions()) const;
+    bool searchPositionIK(const pose_t& ik_pose,
+                          const std::vector<double>& ik_seed_state,
+                          double timeout,
+                          const std::vector<double>& consistency_limits,
+                          std::vector<double>& solution,
+                          const IKCallbackFn& solution_callback,
+                          error_code_t& error_code,
+                          const options_t& options=options_t()) const   ;
 
-    virtual bool searchPositionIK(geometry_msgs::msg::Pose const& ik_pose,
-                                  std::vector<double> const& ik_seed_state,
-                                  double timeout,
-                                  std::vector<double> const& consistency_limits,
-                                  std::vector<double>& solution,
-                                  IKCallbackFn const& solution_callback,
-                                  moveit_msgs::msg::MoveItErrorCodes& error_code,
-                                  kinematics::KinematicsQueryOptions const& options =
-                                      kinematics::KinematicsQueryOptions()) const;
-
-    virtual bool searchPositionIK(
-        std::vector<geometry_msgs::msg::Pose> const& ik_poses,
-        std::vector<double> const& ik_seed_state,
-        double timeout,
-        std::vector<double> const& consistency_limits,
-        std::vector<double>& solution,
-        IKCallbackFn const& solution_callback,
-        moveit_msgs::msg::MoveItErrorCodes& error_code,
-        kinematics::KinematicsQueryOptions const& options = kinematics::KinematicsQueryOptions(),
-        moveit::core::RobotState const* context_state = NULL) const;
+    bool searchPositionIK(const std::vector<pose_t>& ik_poses,
+                          const std::vector<double>& ik_seed_state,
+                          double timeout,
+                          const std::vector<double>& consistency_limits,
+                          std::vector<double>& solution,
+                          const IKCallbackFn& solution_callback,
+                          error_code_t& error_code,
+                          const options_t& options=options_t(),
+                          const robot_state_t* context_state=nullptr) const;
 
   private:
-    rclcpp::Node::SharedPtr node_;
-    std::shared_ptr<ParamListener> parameter_listener_;
-    moveit::core::JointModelGroup const* jmg_;
+    dh_param_t  computeDHParam(const vector3_t& np, const vector3_t& nc,
+                               const transformt_t& T)           const   ;
+    
 
-    std::vector<std::string> joint_names_;
-    std::vector<std::string> link_names_;
-    std::vector<size_t> tip_link_indices_;
-    Robot robot_;
+  private:
+    rclcpp::Node::SharedPtr              node_;
+    std::shared_ptr<ParamListener>       parameter_listener_;
+    const moveit::core::JointModelGroup* jmg_;
 
-    mutable std::mutex fk_mutex_;
+    std::vector<std::string>             joint_names_;
+    std::vector<std::string>             link_names_;
+    std::vector<size_t>                  tip_link_indices_;
+    std::unique_ptr<quik::Robot>         robot_;
+
+    mutable std::mutex                   fk_mutex_;
 };
 }  // namespace quik_ik
