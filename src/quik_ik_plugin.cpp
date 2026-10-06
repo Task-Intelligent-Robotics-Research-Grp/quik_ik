@@ -31,11 +31,7 @@
 //
 // Author: Toshio Ueshiba (t.ueshiba@aist.go.jp)
 //
-#include <quik_ik/fk_moveit.hpp>
-#include <quik_ik/goal.hpp>
-#include <quik_ik/ik_gradient.hpp>
-#include <quik_ik/ik_memetic.hpp>
-#include <quik_ik/quik_ik_parameters.hpp>
+//#include <quik_ik/quik_ik_parameters.hpp>
 #include <quik_ik/quik_ik_plugin.hpp>
 
 #include <pluginlib/class_list_macros.hpp>
@@ -136,7 +132,7 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
     link_types_t      link_types(joint_names_.size());
     qsign_t           qsigns(joint_names_.size());
     auto              T = transform_t::Identity();
-    transform_t       T01;
+    transform_t       Tbase;
     vector3_t         np;
     double            lambda = 0.0;
     size_t            joint_num = 0;
@@ -148,7 +144,7 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
 
         if (joint_num == 0)
         {
-            T01      = T;
+            Tbase    = T;
             DH(0, 0) = 0.0;     // a_1
             DH(0, 1) = 0.0;     // alpha_1
             lambda   = 0.0;
@@ -192,7 +188,9 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
         }
     }
 
-    robot_ = make_unique<robot_t>(DH, link_types, qsigns, T01, T);
+    DH(joint_num-1, 2) = lambda;
+
+    robot_ = make_unique<robot_t>(DH, link_types, qsigns, Tbase, T);
 
     // link_names are the same as tip frames
     // TODO: why do we need to set this
@@ -202,7 +200,6 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
                        .or_else([](auto const& error)
                                 { throw std::invalid_argument(error); })
                        .value();
-    robot_ = Robot::from(robot_model_, jmg_, tip_link_indices_);
 
     return true;
 }
