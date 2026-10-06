@@ -149,8 +149,7 @@ class QuikIKPlugin : public kinematics::KinematicsBase
 
   private:
     dh_param_t  computeDHParam(const vector3_t& np, const vector3_t& nc,
-                               const transformt_t& T)           const   ;
-    
+			       const transformt_t& T)		const   ;
 
   private:
     rclcpp::Node::SharedPtr              node_;

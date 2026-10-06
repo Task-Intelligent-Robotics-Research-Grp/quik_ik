@@ -135,7 +135,6 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
     dh_params_array_t DH(joint_names_.size());
     link_types_t      link_types(joint_names_.size());
     qsign_t           qsigns(joint_names_.size());
-    auto              S = transform_t::Identity();    // DH coordinates
     auto              T = transform_t::Identity();
     transform_t       T01;
     vector3_t         np;
@@ -149,7 +148,7 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
 
         if (joint_num == 0)
         {
-            T01 = T;
+            T01      = T;
             DH(0, 0) = 0.0;     // a_1
             DH(0, 1) = 0.0;     // alpha_1
             lambda   = 0.0;
@@ -166,7 +165,8 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
                 DH(joint_num,   0) = dh.a;
                 DH(joint_num,   1) = dh.alpha;
                 DH(joint_num-1, 2) = lambda - dh.mu;
-                lambda = dh.lambda;
+                lambda             = dh.lambda;
+		qsigns[joint_num]  = 
                 link_types[joint_num++] = quik::JOINT_REVOLUTE;
                 T.setIdentity();
                 np = nc;
@@ -745,9 +745,32 @@ QuikIKPlugin::getDHParams(std::vector<DHParam>& dhparameters,
 }
 
 QuikIKPlugin::dh_param_t
-QuikIKPlugin::computeDHParam(const vector3_t& np, const vector3_t& nc,
-                             const transform_t& T) const
+QuikIKPlugin::computeDHParam(const vector3_t& np,
+			     const vector3_t& nc, const transform_t& T) const
 {
+    const auto	t = T.translation();
+    const auto	n = T.linear() * nc;
+    const auto	x = np.cross(n);
+    const auto	l = x.norm();
+
+    dh_param_t	dh;
+
+    if (l < 0.01)
+    {
+	dh.a      = n.cross(t.cross(n)).norm();
+	dh.alpha  = 0.0;
+	dh.lambda = 0.0;
+	dh.mu     = 0.0;
+    }
+    else
+    {
+	dh.a      = x.dot(t) / l;
+	dh.alpha  = std::asin(l);
+	dh.lambda = np.dot(n.cross(t.cross(n)))  / (l*l);
+	dh.mu     = n.dot(np.cross(t.cross(np))) / (l*l);
+    }
+    
+    return dh;
 }
 }  // namespace quik_ik
 
