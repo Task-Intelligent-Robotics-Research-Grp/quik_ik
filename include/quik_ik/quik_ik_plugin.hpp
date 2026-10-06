@@ -33,9 +33,11 @@
 //
 #pragma once
 
+#include <iostream>
 #include <quik/Robot.hpp>
 #include <quik/IKSolver.hpp>
-#include <moveit/kinematics_base/kinematics_base.h>
+#include <moveit/kinematics_base/kinematics_base.hpp>
+#include <moveit/robot_model/robot_model.hpp>
 
 namespace quik_ik
 {
@@ -61,6 +63,7 @@ class QuikIKPlugin : public kinematics::KinematicsBase
     using transform_t   = Eigen::Isometry3d;
     using vector3_t     = Eigen::Vector3d;
     using robot_t       = quik::Robot<>;
+    using solver_t      = quik::IKSolver<>;
 
     struct dh_param_t
     {
@@ -148,8 +151,16 @@ class QuikIKPlugin : public kinematics::KinematicsBase
                           const robot_state_t* context_state=nullptr) const;
 
   private:
+    bool getDHParams(std::vector<quik::DHParam>& dhparameters,
+                     const joint_model_t* joint,
+                     const transform_t& parentWorldTransform,
+                     const vector3_t& parentX,
+                     const vector3_t& parentZ,
+                     const vector3_t& parentPos,
+                     bool asRootJoint,
+                     transform_t& parentWorldTransformDH)    const   ;
     dh_param_t  computeDHParam(const vector3_t& np, const vector3_t& nc,
-			       const transformt_t& T)		const   ;
+			       const transform_t& T)		const   ;
 
   private:
     rclcpp::Node::SharedPtr              node_;
@@ -159,8 +170,10 @@ class QuikIKPlugin : public kinematics::KinematicsBase
     std::vector<std::string>             joint_names_;
     std::vector<std::string>             link_names_;
     std::vector<size_t>                  tip_link_indices_;
-    std::unique_ptr<quik::Robot>         robot_;
 
+    std::unique_ptr<robot_t>             robot_;
+    std::unique_ptr<solver_t>            solver_;
+    
     mutable std::mutex                   fk_mutex_;
 };
 }  // namespace quik_ik

@@ -20,14 +20,31 @@ ament_auto_find_build_dependencies()
 ##########################
 #  libquik_ik_plugin.so  #
 ##########################
+generate_parameter_library(
+  quik_ik_parameters
+    src/quik_ik_parameters.yaml
+)
+
 ament_auto_add_library(
   ${PROJECT_NAME}_plugin SHARED
     src/quik_ik_plugin.cpp
 )
 
+target_include_directories(
+  ${PROJECT_NAME}_plugin PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
+    $<INSTALL_INTERFACE:include>
+    ${quik_INCLUDE_DIRS}
+)
+
+# target_link_libraries(
+#   ${PROJECT_NAME}_plugin PUBLIC
+#     quik_ik_parameters
+# )
+
 pluginlib_export_plugin_description_file(
   moveit_core
-  quik_ik_kinematics_description.xml
+    quik_ik_kinematics_description.xml
 )
 
 ##########
