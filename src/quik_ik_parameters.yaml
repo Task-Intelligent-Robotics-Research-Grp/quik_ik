@@ -1,198 +1,97 @@
-pick_ik:
-  # Overall solver settings
-  mode: {
-    type: string,
-    default_value: "global",
-    description: "IK solver mode. Set to global to allow the initial guess to be a long distance from the goal, or local if the initial guess is near the goal.",
+quik_ik:
+  max_iterations: {
+    type:          int,
+    default_value: 200,
+    description:   "Maximum number of iterations of the algorithm.",
     validation: {
-      one_of<>: [["global", "local"]]
+      gt<>: [0],
     }
   }
-  gd_step_size: {
-    type: double,
-    default_value: 0.0001,
-    description: "Gradient descent step size for joint perturbation",
+  algorithm: {
+    type:          string,
+    default_value: "QUIK",
+    description:   "The algorithm to use.",
     validation: {
-      gt_eq<>: [1.0e-12],
+      one_of<>: [["QUIK", "NR", "BFGS"]],
     }
   }
-  gd_max_iters: {
-    type: int,
-    default_value: 100,
-    description: "Maximum iterations for local gradient descent",
-    validation: {
-      gt_eq<>: [1],
-    }
-  }
-  gd_min_cost_delta: {
-    type: double,
+  exit_tolerance: {
+    type:          double,
     default_value: 1.0e-12,
-    description: "Minimum change in cost function value for gradient descent",
+    description:   "The exit tolerance on the norm of the error.",
     validation: {
       gt_eq<>: [1.0e-64],
     }
   }
-  # Cost functions and thresholds
-  position_threshold: {
-    type: double,
-    default_value: 0.001,
-    description: "Position threshold for solving IK, in meters",
+  minimum_step_size: {
+    type:          double,
+    default_value: 1.0e-14,
+    description:   "The minimum joint angle step size(normed) before the solver exits.",
     validation: {
-      gt_eq<>: [0.0],
-    },
+      gt_eq<>: [1.0e-64],
+    }
   }
-  orientation_threshold: {
-    type: double,
-    default_value: 0.001,
-    description: "Orientation threshold for solving IK, in radians",
-    validation: {
-      gt_eq<>: [0.0],
-    },
-  }
-  approximate_solution_position_threshold: {
-    type: double,
+  relative_improvement_tolerance: {
+    type:          double,
     default_value: 0.05,
-    description: "Position threshold for approximate IK solutions, in meters. If displacement is larger than this, the approximate solution will fall back to the initial guess",
+    description:   "The minimum relative iteration-to-iteration improvement. If this threshold isn't met, a counter is incremented. If the threshold isn't met [max_consecutive_grad_fails] times in a row, then the algorithm exits. For example, 0.05 represents a minimum of 5% relative improvement.",
     validation: {
-      gt_eq<>: [0.0],
-    },
+      gt<>: [0.0],
+    }
   }
-  approximate_solution_orientation_threshold: {
-    type: double,
-    default_value: 0.05,
-    description: "Orientation threshold for approximate IK solutions, in radians. If displacement is larger than this, the approximate solution will fall back to the initial guess",
+  max_consecutive_grad_fails: {
+    type:          int,
+    default_value: 5,
+    description:   "The maximum number of relative improvement fails before the algorithm exits.",
     validation: {
-      gt_eq<>: [0.0],
-    },
+      gt<>: [0],
+    }
   }
-  approximate_solution_joint_threshold: {
-    type: double,
+  max_gradient_fails: {
+    type:          int,
+    default_value: 20,
+    description:   "The maximum number of fails before the algorithm exits.",
+    validation: {
+      gt<>: [0],
+    }
+  }
+  lambda_squared: {
+    type:          double,
     default_value: 0.0,
-    description: "Joint threshold for approximate IK solutions, in radians. If displacement is larger than this, the approximate solution will fall back to the initial guess",
+    description:   "The square of the damping factor, lambda. Only applies to the NR and QuIK methods. If given, these methods become the DNR (also known as levenberg-marquardt) or the DQuIK algorithm. Ignored for BFGS algorithm.",
     validation: {
       gt_eq<>: [0.0],
-    },
+    }
   }
-  approximate_solution_cost_threshold: {
-    type: double,
-    default_value: 0.0,
-    description: "Cost threshold for approximate IK solutions. If the result of the cost function is larger than this, the approximate solution will fall back to the initial guess.",
+  max_linear_step_size: {
+    type:          double,
+    default_value: 0.34,
+    description:   "An upper limit of the error step in a single step. Ignored for BFGS algorithm.",
     validation: {
-      gt_eq<>: [0.0],
-    },
+      gt<>: [0.0],
+    }
   }
-  cost_threshold: {
-    type: double,
-    default_value: 0.001,
-    description: "Scalar value for comparing to result of cost functions. IK is considered solved when all position/rotation/twist thresholds are satisfied and all cost functions return a value lower than this value.",
-    validation: {
-      gt_eq<>: [0.0],
-    },
-  }
-  position_scale: {
-    type: double,
+  max_angular_step_size: {
+    type:          double,
     default_value: 1.0,
-    description: "The position scale for the pose cost function. Set to 0.0 to solve for only rotation or other goals",
+    description:   "An upper limit of the error step in a single step. Ignored for BFGS algorithm.",
     validation: {
-      gt_eq<>: [0.0],
-    },
+      gt<>: [0.0],
+    }
   }
-  rotation_scale: {
-    type: double,
+  armijo_sigma: {
+    type:          double,
+    default_value: 1.0e-5,
+    description:   "The sigma value used in armijo's rule, for line search in the BFGS method",
+    validation: {
+      gt<>: [0.0],
+    }
+  }
+  armijo_beta: {
+    type:          double,
     default_value: 0.5,
-    description: "The rotation scale for the pose cost function. Set to 0.0 to solve for only position",
+    description:   "The sigma value used in armijo's rule, for line search in the BFGS method",
     validation: {
-      gt_eq<>: [0.0],
-    },
-  }
-  center_joints_weight: {
-    type: double,
-    default_value: 0.0,
-    description: "Weight for centering cost function, >0.0 enables const function",
-    validation: {
-      gt_eq<>: [0.0],
-    },
-  }
-  avoid_joint_limits_weight: {
-    type: double,
-    default_value: 0.0,
-    description: "Weight for avoiding joint limits cost function, >0.0 enables const function",
-    validation: {
-      gt_eq<>: [0.0],
-    },
-  }
-  minimal_displacement_weight: {
-    type: double,
-    default_value: 0.0,
-    description: "Weight for minimal displacement cost function, >0.0 enables const function",
-    validation: {
-      gt_eq<>: [0.0],
-    },
-  }
-  stop_optimization_on_valid_solution : {
-    type: bool,
-    default_value: true,
-    description: "If false, keeps running after finding a solution to further optimize the solution until a time or iteration limit is reached",
-  }
-  # Memetic IK specific parameters
-  memetic_num_threads: {
-    type: int,
-    default_value: 1,
-    description: "Number of threads for memetic IK",
-    validation: {
-      gt_eq<>: [1],
-    }
-  }
-  memetic_stop_on_first_solution: {
-    type: bool,
-    default_value: true,
-    description: "If true, stops on first solution and terminates other threads",
-  }
-  memetic_population_size: {
-    type: int,
-    default_value: 16,
-    description: "Population size for memetic IK",
-    validation: {
-      gt_eq<>: [1],
-    }
-  }
-  memetic_elite_size: {
-    type: int,
-    default_value: 4,
-    description: "Number of elite members of memetic IK population",
-    validation: {
-      gt_eq<>: [1],
-    }
-  }
-  memetic_wipeout_fitness_tol: {
-    type: double,
-    default_value: 0.00001,
-    description: "Minimum fitness must improve by this value or population will be wiped out",
-    validation: {
-      gt_eq<>: [0.0],
-    }
-  }
-  memetic_max_generations: {
-    type: int,
-    default_value: 100,
-    description: "Maximum iterations of evolutionary algorithm",
-    validation: {
-      gt_eq<>: [1],
-    }
-  }
-  memetic_gd_max_iters: {
-    type: int,
-    default_value: 25,
-    description: "Maximum iterations of gradient descent during memetic exploitation",
-    validation: {
-      gt_eq<>: [1],
-    }
-  }
-  memetic_gd_max_time: {
-    type: double,
-    default_value: 0.005,
-    description: "Maximum time spent on gradient descent during memetic exploitation",
-    validation: {
-      gt_eq<>: [0.0],
+      gt<>: [0.0],
     }
   }

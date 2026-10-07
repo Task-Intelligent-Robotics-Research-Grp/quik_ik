@@ -1,5 +1,5 @@
 <library path="quik_ik_plugin">
-  <class name="quik_ik/QuikIKPlugin"
+  <class name="quik_ik/QuikIkPlugin"
 	 type="quik_ik::QuikIKPlugin"
 	 base_class_type="kinematics::KinematicsBase">
     </class>

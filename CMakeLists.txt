@@ -1,67 +1,76 @@
-cmake_minimum_required(VERSION 3.20)
+cmake_minimum_required(VERSION 3.16)
 project(quik_ik)
 
-if(NOT CMAKE_C_STANDARD)
-  set(CMAKE_C_STANDARD 99)
-endif()
-if(NOT CMAKE_CXX_STANDARD)
-  set(CMAKE_CXX_STANDARD 17)
-endif()
-if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-  add_compile_options(-Wall -Wextra -Wpedantic)
+if(CMAKE_CXX_COMPILER_ID MATCHES "(GNU|Clang)")
+  add_compile_options(-Wall -Wextra -Wpedantic -Wshadow -Wconversion -Wsign-conversion -Wold-style-cast)
 endif()
 
-##################
-#  dependencies  #
-##################
-find_package(ament_cmake_auto REQUIRED)
-ament_auto_find_build_dependencies()
+find_package(ament_cmake REQUIRED)
+find_package(rclcpp REQUIRED)
+find_package(moveit_core REQUIRED)
+find_package(pluginlib REQUIRED)
+find_package(class_loader REQUIRED)
+find_package(quik REQUIRED)
 
-##########################
-#  libquik_ik_plugin.so  #
-##########################
 generate_parameter_library(
-  quik_ik_parameters
+  ${PROJECT_NAME}_parameters
     src/quik_ik_parameters.yaml
 )
 
-ament_auto_add_library(
+add_library(
   ${PROJECT_NAME}_plugin SHARED
     src/quik_ik_plugin.cpp
 )
 
+target_compile_features(
+  ${PROJECT_NAME}_plugin PUBLIC
+    c_std_99 cxx_std_17)
+
 target_include_directories(
   ${PROJECT_NAME}_plugin PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
-    $<INSTALL_INTERFACE:include>
-    ${quik_INCLUDE_DIRS}
+    $<INSTALL_INTERFACE:include/${PROJECT_NAME}>
 )
 
-# target_link_libraries(
-#   ${PROJECT_NAME}_plugin PUBLIC
-#     quik_ik_parameters
-# )
+target_link_libraries(
+  ${PROJECT_NAME}_plugin
+  PUBLIC
+    moveit_core::moveit_robot_model
+  PRIVATE
+    ${PROJECT_NAME}_parameters
+    class_loader::class_loader
+    moveit_core::moveit_kinematics_base
+    moveit_core::moveit_robot_state
+    pluginlib::pluginlib
+    rclcpp::rclcpp
+    quik::quik
+)
+
+install(
+  DIRECTORY   include/
+  DESTINATION include
+)
+
+install(
+  TARGETS ${PROJECT_NAME}_plugin ${PROJECT_NAME}_parameters
+  EXPORT  export_${PROJECT_NAME}
+  ARCHIVE DESTINATION lib
+  LIBRARY DESTINATION lib
+  RUNTIME DESTINATION bin
+)
 
 pluginlib_export_plugin_description_file(
   moveit_core
-    quik_ik_kinematics_description.xml
+    ${PROJECT_NAME}_kinematics_description.xml
 )
 
-##########
-#  test  #
-##########
-if(BUILD_TESTING)
-  find_package(ament_lint_auto REQUIRED)
+ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)
+ament_export_dependencies(
+  class_loader
+  moveit_core
+  pluginlib
+  rclcpp
+  quik
+)
 
-  # the following line skips the linter which checks for copyrights
-  # comment the line when a copyright and license is added to all source files
-  set(ament_cmake_copyright_FOUND TRUE)
-
-  # the following line skips cpplint (only works in a git repo)
-  # comment the line when this package is in a git repo and when
-  # a copyright and license is added to all source files
-  set(ament_cmake_cpplint_FOUND TRUE)
-  ament_lint_auto_find_test_dependencies()
-endif()
-
-ament_auto_package()
+ament_package()

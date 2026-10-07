@@ -50,25 +50,24 @@ class QuikIKPlugin : public kinematics::KinematicsBase
 {
   private:
     using pose_t        = geometry_msgs::msg::Pose;
-    using joint_model_t = moveit::core::JointModel;
     using robot_model_t = moveit::core::RobotModel;
     using robot_state_t = moveit::core::RobotState;
     using error_code_t  = moveit_msgs::msg::MoveItErrorCodes;
     using options_t     = kinematics::KinematicsQueryOptions;
 
-    using dh_params_t   = Eigen::Array<double, Eigen::Dynamic, 4>;
+    using robot_t       = quik::Robot<>;
+    using solver_t      = quik::IKSolver<>;
     using link_type_t   = quik::JOINTTYPE_t;
     using link_types_t  = Eigen::VectorX<link_type_t>;
+    using dh_params_t   = Eigen::Array<double, Eigen::Dynamic, 4>;
     using qsign_t       = Eigen::VectorXd;
     using transform_t   = Eigen::Isometry3d;
     using vector3_t     = Eigen::Vector3d;
-    using robot_t       = quik::Robot<>;
-    using solver_t      = quik::IKSolver<>;
 
     struct dh_param_t
     {
-        double  a       = 0.0;
-        double  alpha   = 0.0;
+        double  a       = 0.0;  // distance between adjacent joint axes
+        double  alpha   = 0.0;  // angle between adjacent joint axes
         double  lambda  = 0.0;
         double  mu      = 0.0;
     };
@@ -151,28 +150,19 @@ class QuikIKPlugin : public kinematics::KinematicsBase
                           const robot_state_t* context_state=nullptr) const;
 
   private:
-    bool getDHParams(std::vector<quik::DHParam>& dhparameters,
-                     const joint_model_t* joint,
-                     const transform_t& parentWorldTransform,
-                     const vector3_t& parentX,
-                     const vector3_t& parentZ,
-                     const vector3_t& parentPos,
-                     bool asRootJoint,
-                     transform_t& parentWorldTransformDH)    const   ;
     dh_param_t  computeDHParam(const vector3_t& np, const vector3_t& nc,
 			       const transform_t& T)		const   ;
 
   private:
     rclcpp::Node::SharedPtr              node_;
-    std::shared_ptr<ParamListener>       parameter_listener_;
+    std::shared_ptr<ParamListener>       param_listener_;
     const moveit::core::JointModelGroup* jmg_;
 
     std::vector<std::string>             joint_names_;
     std::vector<std::string>             link_names_;
     std::vector<size_t>                  tip_link_indices_;
 
-    std::unique_ptr<robot_t>             robot_;
-    std::unique_ptr<solver_t>            solver_;
+    std::shared_ptr<robot_t>             robot_;
     
     mutable std::mutex                   fk_mutex_;
 };

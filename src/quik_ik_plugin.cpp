@@ -31,15 +31,15 @@
 //
 // Author: Toshio Ueshiba (t.ueshiba@aist.go.jp)
 //
-//#include <quik_ik/quik_ik_parameters.hpp>
+#include <quik_ik/quik_ik_parameters.hpp>
 #include <quik_ik/quik_ik_plugin.hpp>
 
 #include <pluginlib/class_list_macros.hpp>
 #include <rclcpp/rclcpp.hpp>
 
 #include <chrono>
-#include <moveit/robot_model/joint_model_group.h>
-#include <moveit/robot_state/robot_state.h>
+#include <moveit/robot_model/joint_model_group.hpp>
+#include <moveit/robot_state/robot_state.hpp>
 #include <string>
 #include <vector>
 
@@ -96,10 +96,10 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
                        << ", base_frame=" << base_frame
                        << ", tip_frames=[" << tip_frames << ']');
 
-    node_ = node;
-    parameter_listener_ = std::make_shared<ParamListener>(
-        node,
-        std::string("robot_description_kinematics.").append(group_name));
+    node_           = node;
+    param_listener_ = std::make_shared<ParamListener>(
+                          node, std::string("robot_description_kinematics.")
+                          .append(group_name));
 
     // Initialize internal state of base class KinematicsBase
     // Creates these internal state variables:
@@ -128,91 +128,87 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
             joint->getType() == JointModel::PRISMATIC)
             joint_names_.push_back(joint->getName());
 
-    dh_params_t  DH(joint_names_.size());
+    dh_params_t  DH(joint_names_.size(), 4);
     link_types_t link_types(joint_names_.size());
     qsign_t      qsigns(joint_names_.size());
     auto         T = transform_t::Identity();
     transform_t  Tbase;
     vector3_t    np;
     double       lambda = 0.0;
-    size_t       joint_num = 0;
+    ssize_t      joint_num = 0;
     for (const auto joint : jmg_->getJointModels())
     {
+        RCLCPP_WARN_STREAM(LOGGER, "### joint_name=" << joint->getName());
+                           
         const auto child_link = joint->getChildLinkModel();
 
         T = T * child_link->getJointOriginTransform();
 
         if (joint_num == 0)
+            Tbase = T;
+        
+        switch (joint->getType())
         {
-            Tbase    = T;
-            DH(0, 0) = 0.0;     // a_1
-            DH(0, 1) = 0.0;     // alpha_1
-            lambda   = 0.0;
-        }
-        else
-        {
-            switch (joint->getType())
-            {
-              case JointModel::REVOLUTE:
-              {
-                const auto nc = static_cast<const RevoluteJointModel*>(joint)
-                              ->getAxis().normalized();
-                const auto dh = computeDHParam(np, nc, T);
-                DH(joint_num,   0) = dh.a;
-                DH(joint_num,   1) = dh.alpha;
+          case JointModel::REVOLUTE:
+          {
+            const auto nc = static_cast<const RevoluteJointModel*>(joint)
+                            ->getAxis().normalized();
+            const auto dh = computeDHParam(np, nc, T);
+            DH(joint_num, 0) = dh.a;
+            DH(joint_num, 1) = dh.alpha;
+            DH(joint_num, 3) = 0.0;
+            if (joint_num > 0)
                 DH(joint_num-1, 2) = lambda - dh.mu;
-                lambda             = dh.lambda;
-		qsigns[joint_num]  = 
-                link_types[joint_num++] = quik::JOINT_REVOLUTE;
-                T.setIdentity();
-                np = nc;
-                break;
-              }
-              case JointModel::PRISMATIC:
-              {
-                const auto nc = static_cast<const PrismaticJointModel*>(joint)
-                              ->getAxis().normalized();
-                const auto dh = computeDHParam(np, nc, T);
-                DH(joint_num,   0) = dh.a;
-                DH(joint_num,   1) = dh.alpha;
+            lambda            = dh.lambda;
+            qsigns[joint_num] = 1;
+            link_types[joint_num++] = quik::JOINT_REVOLUTE;
+            T.setIdentity();
+            np = nc;
+            break;
+          }
+          case JointModel::PRISMATIC:
+          {
+            const auto nc = static_cast<const PrismaticJointModel*>(joint)
+                          ->getAxis().normalized();
+            const auto dh = computeDHParam(np, nc, T);
+            DH(joint_num, 0) = dh.a;
+            DH(joint_num, 1) = dh.alpha;
+            DH(joint_num, 3) = 0.0;
+            if (joint_num > 0)
                 DH(joint_num-1, 2) = lambda - dh.mu;
-                lambda = dh.lambda;
-                link_types[joint_num++] = quik::JOINT_PRISMATIC;
-                T.setIdentity();
-                np = nc;
-                break;
-              }
-              default:
-                break;
-            }
+            lambda            = dh.lambda;
+            qsigns[joint_num] = 1;
+            link_types[joint_num++] = quik::JOINT_PRISMATIC;
+            T.setIdentity();
+            np = nc;
+            break;
+          }
+          default:
+            break;
         }
     }
 
     DH(joint_num-1, 2) = lambda;
 
-    robot_ = make_unique<robot_t>(DH, link_types, qsigns, Tbase, T);
-    solver_ = make_unique<solver_t>(
-                  robot_, 200, // max number of iterations
-                  quik::ALGORITHM_QUIK,
-                  1e-12, // Exit tolerance
-                  1e-14, // Minimum step tolerance
-                  0.05, // iteration-to-iteration improvement tolerance (0.05 = 5% relative improvement)
-                  10, // max consequitive gradient fails
-                  80, // Max gradient fails
-                  1e-10, // lambda2 (lambda^2, the damping parameter for DQuIK and DNR)
-                  0.34, // Max linear error step
-                  1 // Max angular error step
-        );
-    
-    // link_names are the same as tip frames
-    // TODO: why do we need to set this
+    RCLCPP_WARN_STREAM(LOGGER, "### DH ###\n" << DH);
+    // RCLCPP_WARN_STREAM(LOGGER, "### link_types=" << link_types);
+    RCLCPP_WARN_STREAM(LOGGER, "### qsigns=" << qsigns);
+
+    robot_ = make_shared<robot_t>(DH, link_types, qsigns,
+                                  Tbase.matrix(), T.matrix());
+
+  // link_names are the same as tip frames
+  // TODO: why do we need to set this
     link_names_ = tip_frames_;
 
-    // tip_link_indices_ = get_link_indices(robot_model_, tip_frames_)
-    //                    .or_else([](auto const& error)
-    //                             { throw std::invalid_argument(error); })
-    //                    .value();
+    RCLCPP_WARN_STREAM(LOGGER, "### joint_names=" << joint_names_);
+    RCLCPP_WARN_STREAM(LOGGER, "### link_names=" << link_names_);
 
+  // tip_link_indices_ = get_link_indices(robot_model_, tip_frames_)
+  //                    .or_else([](auto const& error)
+  //                             { throw std::invalid_argument(error); })
+  //                    .value();
+    
     return true;
 }
 
@@ -248,7 +244,23 @@ QuikIKPlugin::searchPositionIK(const std::vector<pose_t>& ik_poses,
 {
     (void)context_state;  // not used
 
-    // Read current ROS parameters
+    const auto  params = param_listener_->get_params();
+    const auto  algo   = (params.algorithm == "QUIK" ? quik::ALGORITHM_QUIK :
+                          params.algorithm == "NR"   ? quik::ALGORITHM_NR   :
+                                                       quik::ALGORITHM_BFGS);
+    const solver_t solver(robot_,
+                          params.max_iterations,
+                          algo,
+                          params.exit_tolerance,
+                          params.minimum_step_size,
+                          params.relative_improvement_tolerance,
+                          params.max_consecutive_grad_fails,
+                          params.max_gradient_fails,
+                          params.lambda_squared,
+                          params.max_linear_step_size,
+                          params.max_angular_step_size,
+                          params.armijo_sigma,
+                          params.armijo_beta);
 }
 
 bool
@@ -377,143 +389,6 @@ QuikIKPlugin::computeDHParam(const vector3_t& np,
     }
     
     return dh;
-}
-
-bool
-QuikIKPlugin::getDHParams(std::vector<quik::DHParam>& dhparameters,
-                          const joint_model_t* joint,
-                          const transform_t& parentWorldTransform,
-                          const vector3_t& parentX,
-                          const vector3_t& parentZ,
-                          const vector3_t& parentPos,
-                          bool asRootJoint,
-                          transform_t& parentWorldTransformDH) const
-{
-    const auto* child_link = joint->getChildLinkModel();
-    if (!child_link)
-    {
-        RCLCPP_ERROR(LOGGER, "consistency, no child link");
-        return false;
-    }
-
-//    ROS_INFO_STREAM("Transform is for link "<<child_link->name);
-/*    LinkConstPtr parentLink = trav->readLink(joint->parent_link_name);
-    ROS_INFO_STREAM("Parent is "<<parentLink->name); */
-
-    vector3_t z, pos, x;
-
-    transform_t jointWorldTransform = transform_t::Identity();
-    transform_t jointWorldTransformDH = transform_t::Identity();
-
-    if (asRootJoint)
-    {
-        // if this is the root joint, we won't consider the joint's
-        // previous transforms, as we'll set this one to be the origin
-        jointWorldTransform.setIdentity();
-        parentWorldTransformDH.setIdentity();
-
-        z = urdf_traverser::getRotationAxis(joint);
-        pos = vector3_t(0, 0, 0);
-        x = parentX;
-    }
-    else
-    {
-        transform_t jointTransform = urdf_traverser::getTransform(joint);
-        jointWorldTransform = parentWorldTransform * jointTransform;
-        // ROS_INFO_STREAM("Parent world transform: "<<parentWorldTransform);
-        // ROS_INFO_STREAM("Joint transform: "<<jointTransform);
-        // ROS_INFO_STREAM("Joint world transform: "<<jointWorldTransform);
-
-        // the global rotation axis of the joint is going to be the
-        // new global z-axis of the DH joint transform.
-        // the position is the global position of the joint.
-        getGlobalCoordinates(joint, parentWorldTransform, z, pos);
-        // ROS_INFO_STREAM("Global rotation axis of joint "<<joint->name<<": "<<z<<", pos "<<pos);
-
-        DHParam param;
-        if (!DHParam::toDenavitHartenberg(param, parentZ, parentX, parentPos, z, pos, x))
-        {
-            RCLCPP_ERROR("could not obtain dh params");
-            return false;
-        }
-
-        // The global pose of the DH joint may be different to the global pose
-        // of the URDF joint. Calculate the pose of the DH joint in world coordinates
-        // and apply it to \e pos, so that the recursion can take this into account.
-        // ROS_INFO_STREAM("Translating  "<<parentPos<<" ( target: "<<pos<<" ) using transform = "<<parentWorldTransformDH);
-
-        transform_t jointTransformDH = transform_t::Identity();
-        vector3_t z(0,0,1);
-        jointTransformDH.translate(z*param.d);
-        jointTransformDH.rotate(Eigen::AngleAxisd(param.theta,z));
-        vector3_t x(1,0,0);
-        jointTransformDH.translate(x*param.r);
-        jointTransformDH.rotate(Eigen::AngleAxisd(param.alpha,x));
-
-        jointWorldTransformDH = parentWorldTransformDH * jointTransformDH;
-
-        /*ROS_INFO_STREAM("parentWorldTransformDH: "<<jointTransformDH);
-        ROS_INFO_STREAM("joint transform DH: "<<jointTransformDH);
-        ROS_INFO_STREAM("joint world transform DH: "<<jointWorldTransformDH);*/
-
-        vector3_t pi_new = jointWorldTransformDH.translation();
-        // ROS_INFO_STREAM("Transformed DH pose: "<<pi_new<<" ( vs URDF space "<<pos<<" )");
-        pos = pi_new;
-
-        param.dof_index = dhparameters.size();
-        param.joint = trav->readParentJoint(joint);
-
-        if (!param.joint)
-        {
-            RCLCPP_ERROR_STREAM(LOGGER, "Consistency: Joint "<<joint->name
-                                <<" has no parent, should have been added as root joint instead!");
-            return false;
-        }
-        LinkConstPtr paramChildLink = trav->readLink(param.joint->child_link_name);
-        if (!paramChildLink)
-        {
-            ROS_ERROR("consistency, no child link");
-            return false;
-        }
-        param.child_link = paramChildLink;
-        dhparameters.push_back(param);
-        // ROS_INFO_STREAM("DH for Joint "<<param.joint->name<<" parent axes: z="<<z<<", x="<<x<<", pos="<<pos<<": "<<param);
-    }
-
-
-    if (child_link->child_joints.empty())
-    {
-        // we've come to the end of the chain, so we have to add the parameter for the last frame.
-        // while r should technically be the link length, we'll just leave this frame at the previous joint's
-        // frame, as the DH parameters for the last joint don't really matter, they only specify the location
-        // of a joint that would follow this one.
-
-        DHParam param;
-        param.dof_index = dhparameters.size();
-        param.joint = joint;
-        param.child_link = child_link;
-
-        param.r = 0;
-        param.d = 0;
-        param.theta = 0;
-        param.alpha = 0;
-
-        dhparameters.push_back(param);
-        // ROS_INFO_STREAM("DH for Joint "<<param.joint->name<<", parent axes: z="<<z<<", x="<<x<<", pos="<<pos<<": "<<param);
-        return true;
-    }
-
-
-    // recurse to child joints
-    for (std::vector<JointPtr>::const_iterator pj = child_link->child_joints.begin();
-            pj != child_link->child_joints.end(); pj++)
-    {
-        if (!getDHParams(dhparameters, *pj, jointWorldTransform, x, z,
-                         pos, false, jointWorldTransformDH))
-            return false;
-    }
-
-    return true;
 }
 }  // namespace quik_ik
 
