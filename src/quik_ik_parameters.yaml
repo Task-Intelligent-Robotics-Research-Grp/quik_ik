@@ -9,10 +9,10 @@ quik_ik:
   }
   algorithm: {
     type:          string,
-    default_value: "QUIK",
+    default_value: "ALGORITHM_QUIK",
     description:   "The algorithm to use.",
     validation: {
-      one_of<>: [["QUIK", "NR", "BFGS"]],
+      one_of<>: [["ALGORITHM_QUIK", "ALGORITHM_NR", "ALGORITHM_BFGS"]],
     }
   }
   exit_tolerance: {

@@ -52,6 +52,7 @@ class QuikIKPlugin : public kinematics::KinematicsBase
     using pose_t        = geometry_msgs::msg::Pose;
     using robot_model_t = moveit::core::RobotModel;
     using robot_state_t = moveit::core::RobotState;
+    using link_model_t  = moveit::core::LinkModel;
     using error_code_t  = moveit_msgs::msg::MoveItErrorCodes;
     using options_t     = kinematics::KinematicsQueryOptions;
 
@@ -60,22 +61,24 @@ class QuikIKPlugin : public kinematics::KinematicsBase
     using link_type_t   = quik::JOINTTYPE_t;
     using link_types_t  = Eigen::VectorX<link_type_t>;
     using dh_params_t   = Eigen::Array<double, Eigen::Dynamic, 4>;
-    using qsign_t       = Eigen::VectorXd;
     using transform_t   = Eigen::Isometry3d;
     using vector3_t     = Eigen::Vector3d;
+    using vector4_t     = Eigen::Vector4d;
+    using vector6_t     = Eigen::Vector<double, 6>;
+    using vector_t      = Eigen::VectorXd;
+    using map_t         = Eigen::Map<const vector_t>;
 
+  public:
     struct dh_param_t
     {
-        double  a       = 0.0;  // distance between adjacent joint axes
-        double  alpha   = 0.0;  // angle between adjacent joint axes
-        double  lambda  = 0.0;
-        double  mu      = 0.0;
+        double      a      = 0.0;  // distance between adjacent joint axes
+        double      alpha  = 0.0;  // angle between adjacent joint axes
+        double      lambda = 0.0;
+        double      mu     = 0.0;
+        transform_t S      = transform_t::Identity();
     };
     
   public:
-    QuikIKPlugin()                                                      ;
-    ~QuikIKPlugin()                                                     ;
-    
     const std::vector<std::string>& getJointNames()             const   ;
     const std::vector<std::string>& getLinkNames()              const   ;
 
@@ -86,20 +89,20 @@ class QuikIKPlugin : public kinematics::KinematicsBase
                     const std::vector<std::string>& tip_frames,
                     double search_discretization)                       ;
 
-    bool getPositionFK(const std::vector<std::string>&,
-                       const std::vector<double>&,
-                       std::vector<pose_t>&)                    const   ;
+    bool getPositionFK(const std::vector<std::string>& link_names,
+                       const std::vector<double>& joint_angles,
+                       std::vector<pose_t>& poses)              const   ;
 
-    bool getPositionIK(const pose_t&,
-                       const std::vector<double>&,
-                       std::vector<double>&,
-                       error_code_t&,
-                       const options_t&)                        const   ;
+    bool getPositionIK(const pose_t& ik_pose,
+                       const std::vector<double>& ik_seed_state,
+                       std::vector<double>& solution,
+                       error_code_t& error_code,
+                       const options_t& options)                const   ;
 
     bool searchPositionIK(const std::vector<pose_t>& ik_poses,
                           const std::vector<double>& ik_seed_state,
                           double timeout,
-                          const std::vector<double>&,
+                          const std::vector<double>& consistency_limits,
                           std::vector<double>& solution,
                           const IKCallbackFn& solution_callback,
                           const IKCostFn& cost_function,
@@ -151,19 +154,22 @@ class QuikIKPlugin : public kinematics::KinematicsBase
 
   private:
     dh_param_t  computeDHParam(const vector3_t& np, const vector3_t& nc,
-			       const transform_t& T)		const   ;
-
-  private:
-    rclcpp::Node::SharedPtr              node_;
-    std::shared_ptr<ParamListener>       param_listener_;
-    const moveit::core::JointModelGroup* jmg_;
-
-    std::vector<std::string>             joint_names_;
-    std::vector<std::string>             link_names_;
-    std::vector<size_t>                  tip_link_indices_;
-
-    std::shared_ptr<robot_t>             robot_;
+                               const transform_t& T)            const   ;
+    bool        withinLimits(const vector_t& q)                 const   ;
+    bool        getPositionFKQuik(const std::vector<std::string>& link_names,
+                                  const std::vector<double>& joint_angles,
+                                  std::vector<pose_t>& poses)   const   ;
+    bool        getPositionFKMoveIt(const std::vector<std::string>& link_names,
+                                    const std::vector<double>& joint_angles,
+                                    std::vector<pose_t>& poses) const   ;
     
-    mutable std::mutex                   fk_mutex_;
+  private:
+    rclcpp::Node::SharedPtr             node_;
+    std::shared_ptr<ParamListener>      param_listener_;
+
+    std::vector<std::string>            joint_names_;
+    std::vector<std::string>            link_names_;
+    std::vector<transform_t>            S_;
+    std::shared_ptr<robot_t>            robot_;
 };
 }  // namespace quik_ik
