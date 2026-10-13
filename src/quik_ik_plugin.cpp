@@ -94,7 +94,7 @@ operator <<(std::ostream& out, const QuikIKPlugin::dh_param_t& dh)
 {
     return out << "a=" << dh.a << ", alpha=" << dh.alpha
                << ", lambda=" << dh.lambda << ", mu=" << dh.mu
-               << "\n  S     =" << dh.S;
+               << "\n  U     =" << dh.U;
 }
 }
 
@@ -179,9 +179,6 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
 
         T = T * child_link->getJointOriginTransform();
         
-        if (joint_num == 0)
-            Tbase = T;
-        
         switch (joint->getType())
         {
           case JointModel::REVOLUTE:
@@ -189,9 +186,12 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
           {
             std::cerr << "  T     =" << T << std::endl;
             
+            link_names_.push_back(child_link->getName());
             link_types[joint_num] = (joint->getType() == JointModel::REVOLUTE ?
                                      quik::JOINT_REVOLUTE :
                                      quik::JOINT_PRISMATIC);
+            qsigns[joint_num] = 1;
+            
             const auto nc = (joint->getType() == JointModel::REVOLUTE ?
                              static_cast<const RevoluteJointModel*>(joint)
                              ->getAxis().normalized() :
@@ -205,10 +205,12 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
           //   column_3 = theta: joint position, theta.
             if (joint_num == 0)
             {
+                Tbase    = T;
                 DH(0, 0) = 0.0;
                 DH(0, 1) = 0.0;
                 DH(0, 3) = 0.0;
                 mu       = 0.0;
+              //U_.push_back(T);
             }
             else
             {
@@ -219,11 +221,9 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
                 DH(joint_num-1, 2) = dh.lambda - mu;
                 DH(joint_num,   3) = 0.0;
                 mu                 = dh.mu;
-                S_.push_back(dh.S);
+                U_.push_back(dh.U);
             }
             
-            qsigns[joint_num] = 1;
-            link_names_.push_back(child_link->getName());
             T.setIdentity();
             np = nc;
             ++joint_num;
@@ -236,17 +236,13 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
 
     DH(joint_num-1, 2) = -mu;
     link_names_.push_back(child_link->getName());
-  //T = T     * S_[joint_num-1].inverse();
     
-    std::cerr << "### DH ###\n" << DH << std::endl;
+    std::cerr << "### DH: [a, alpha, d, theta] ###\n" << DH << std::endl;
     std::cerr << "Tbase=" << Tbase << std::endl;
     std::cerr << "Ttool=" << T << std::endl;
 
     robot_ = make_shared<robot_t>(DH, link_types, qsigns,
                                   Tbase.matrix(), T.matrix());
-
-  // link_names are the same as tip frames
-  // TODO: why do we need to set this
 
     std::cerr << "joint_names=" << getJointNames() << std::endl;
     std::cerr << "link_names=" << getLinkNames() << std::endl;
@@ -504,20 +500,19 @@ QuikIKPlugin::computeDHParam(const vector3_t& np,
     
     dh_param_t  dh;
 
-    if (l < 0.01)      // 'np' is parallel to 'nz'.
+    if (l < 0.01)      // Is 'np' parallel to 'nz'?
     {
         nx = nz.cross(t.cross(nz));  // 'nx' is a vertical component of 't'.
         l  = nx.norm();
         
-        if (l < 0.01)  // 't' and 'nz' are parallel.
+        if (l < 0.01)  // Is 't' parallel to 'nz'?
         {
-            dh.a      = 0.0;
+            dh.a      = nz.dot(t);
             dh.alpha  = 0.0;
             dh.lambda = 0.0;
             dh.mu     = 0.0;
-
-            dh.S.translation() = t;
-
+            dh.U      = T;
+            
             return dh;
         }
      
@@ -536,11 +531,14 @@ QuikIKPlugin::computeDHParam(const vector3_t& np,
         dh.mu     = t.dot(np.cross(nx)) / l;
     }
 
-    dh.S.linear().col(0) = nx;
-    dh.S.linear().col(1) = nz.cross(nx);
-    dh.S.linear().col(2) = nz;
-    dh.S.translation()   = dh.mu * nz;
+    transform_t S;
+    S.linear().col(0) = nx;
+    S.linear().col(1) = nz.cross(nx);
+    S.linear().col(2) = nz;
+    S.translation()   = dh.mu * nz;
 
+    dh.U = T * S;
+    
     return dh;
 }
 
@@ -583,10 +581,11 @@ QuikIKPlugin::getPositionFKQuik(const std::vector<std::string>& link_names,
             return false;
         }
 
-        std::cerr << "### link_name=" << link_name << ", idx=" << idx;
+        std::cerr << "### link_name=" << link_name << ", idx=" << idx
+                  << std::endl;
         
         const auto  Ti = T.template middleRows<4>(4*idx)
-                       * S_[idx].inverse().matrix();
+                       * U_[idx].inverse().matrix();
         vector4_t   orientation;
         vector3_t   position;
         quik::geometry::hgt2quatpos(Ti, orientation, position);
@@ -601,7 +600,7 @@ QuikIKPlugin::getPositionFKQuik(const std::vector<std::string>& link_names,
         pose.orientation.w = orientation(0);
         poses.push_back(pose);
 
-        RCLCPP_INFO_STREAM(LOGGER, "  " << link_name << ": " << pose);
+        std::cerr << "  " << link_name << ": " << pose << std::endl;
     }
     
     return true;
@@ -630,7 +629,7 @@ QuikIKPlugin::getPositionFKMoveIt(const std::vector<std::string>& link_names,
         const auto pose = tf2::toMsg(Tb0 * robot_state.getGlobalLinkTransform(
                                                link_name));
         poses.push_back(pose);
-        RCLCPP_INFO_STREAM(LOGGER, "  " << link_name << ": " << pose);
+        std::cerr << "  " << link_name << ": " << pose << std::endl;
     }
 
     return true;
