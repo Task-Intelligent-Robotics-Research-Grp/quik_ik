@@ -234,9 +234,9 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
         }
     }
 
-    DH(joint_num-1, 2) = lambda;
+    DH(joint_num-1, 2) = -mu;
     link_names_.push_back(child_link->getName());
-    T     = T     * S_[joint_num-1].inverse();
+  //T = T     * S_[joint_num-1].inverse();
     
     std::cerr << "### DH ###\n" << DH << std::endl;
     std::cerr << "Tbase=" << Tbase << std::endl;
@@ -504,12 +504,12 @@ QuikIKPlugin::computeDHParam(const vector3_t& np,
     
     dh_param_t  dh;
 
-    if (l < 0.001)      // 'np' is zero, i.e. the first active joint,
-    {                   //  or 'np' is parallel to 'nz'.
+    if (l < 0.01)      // 'np' is parallel to 'nz'.
+    {
         nx = nz.cross(t.cross(nz));  // 'nx' is a vertical component of 't'.
         l  = nx.norm();
         
-        if (l < 0.001)  // 't' and 'nz' are parallel.
+        if (l < 0.01)  // 't' and 'nz' are parallel.
         {
             dh.a      = 0.0;
             dh.alpha  = 0.0;
@@ -520,14 +520,12 @@ QuikIKPlugin::computeDHParam(const vector3_t& np,
 
             return dh;
         }
-        else
-        {
-            nx /= l;
-            dh.a      = nx.dot(t);
-            dh.alpha  = 0.0;
-            dh.lambda = 0.0;
-            dh.mu     = 0.0;
-        }
+     
+        nx /= l;
+        dh.a      = nx.dot(t);
+        dh.alpha  = 0.0;
+        dh.lambda = 0.0;
+        dh.mu     = 0.0;
     }
     else
     {
@@ -584,8 +582,11 @@ QuikIKPlugin::getPositionFKQuik(const std::vector<std::string>& link_names,
                                 << link_name);
             return false;
         }
+
+        std::cerr << "### link_name=" << link_name << ", idx=" << idx;
         
-        const auto  Ti = S_[idx].inverse() * T.template middleRows<4>(4*idx);
+        const auto  Ti = T.template middleRows<4>(4*idx)
+                       * S_[idx].inverse().matrix();
         vector4_t   orientation;
         vector3_t   position;
         quik::geometry::hgt2quatpos(Ti, orientation, position);
