@@ -69,23 +69,23 @@ operator <<(std::ostream& out, const std::map<K, V>& m)
 std::ostream&
 operator <<(std::ostream& out, const geometry_msgs::msg::Pose& pose)
 {
-    return out << '['  << pose.position.x
-               << ','  << pose.position.y
-               << ','  << pose.position.z
-               << "; " << pose.orientation.x
-               << ','  << pose.orientation.y
-               << ','  << pose.orientation.z
-               << ','  << pose.orientation.w
+    return out << '['   << pose.position.x
+               << ' '   << pose.position.y
+               << ' '   << pose.position.z
+               << ";  " << pose.orientation.x
+               << ' '   << pose.orientation.y
+               << ' '   << pose.orientation.z
+               << ' '   << pose.orientation.w
                << ']';
 }
-    
+
 std::ostream&
 operator <<(std::ostream& out, const Eigen::Isometry3d& transform)
 {
     const Eigen::Vector3d     t(transform.translation());
     const Eigen::Quaterniond  q(transform.linear());
-    return out << '['  << t(0) << ',' << t(1) << ',' << t(2)
-               << "; " << q.x() << ',' << q.y() << ',' << q.z() << ',' << q.w()
+    return out << '[' << t(0) << ' ' << t(1) << ' ' << t(2) << ";  "
+               << q.x() << ' ' << q.y() << ' ' << q.z() << ' ' << q.w()
                << ']';
 }
 
@@ -94,7 +94,7 @@ operator <<(std::ostream& out, const QuikIKPlugin::dh_param_t& dh)
 {
     return out << "a=" << dh.a << ", alpha=" << dh.alpha
                << ", lambda=" << dh.lambda << ", mu=" << dh.mu
-               << "\n  U     =" << dh.U;
+               << "\n      S=" << dh.S;
 }
 }
 
@@ -123,6 +123,8 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
 {
     using namespace moveit::core;
 
+    std::cerr << std::fixed;
+
     RCLCPP_INFO_STREAM(LOGGER,
                        "quik_ik initialized: group_name=" << group_name
                        << ", base_frame=" << base_frame
@@ -133,7 +135,7 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
                           node, std::string("robot_description_kinematics.")
                           .append(group_name));
 
-    // Initialize internal state of base class KinematicsBase
+    // Initialize internal state of base class KinematicsBase.
     // Creates these internal state variables:
     //   robot_model_                    <- shared_ptr to RobotModel
     //   robot_description_              <- empty string
@@ -178,20 +180,20 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
                   << std::endl;
 
         T = T * child_link->getJointOriginTransform();
-        
+
         switch (joint->getType())
         {
           case JointModel::REVOLUTE:
           case JointModel::PRISMATIC:
           {
             std::cerr << "  T     =" << T << std::endl;
-            
+
             link_names_.push_back(child_link->getName());
             link_types[joint_num] = (joint->getType() == JointModel::REVOLUTE ?
                                      quik::JOINT_REVOLUTE :
                                      quik::JOINT_PRISMATIC);
             qsigns[joint_num] = 1;
-            
+
             const auto nc = (joint->getType() == JointModel::REVOLUTE ?
                              static_cast<const RevoluteJointModel*>(joint)
                              ->getAxis().normalized() :
@@ -210,7 +212,6 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
                 DH(0, 1) = 0.0;
                 DH(0, 3) = 0.0;
                 mu       = 0.0;
-              //U_.push_back(T);
             }
             else
             {
@@ -221,9 +222,9 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
                 DH(joint_num-1, 2) = dh.lambda - mu;
                 DH(joint_num,   3) = 0.0;
                 mu                 = dh.mu;
-                U_.push_back(dh.U);
+                S_.push_back(dh.S);
             }
-            
+
             T.setIdentity();
             np = nc;
             ++joint_num;
@@ -236,7 +237,7 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
 
     DH(joint_num-1, 2) = -mu;
     link_names_.push_back(child_link->getName());
-    
+
     std::cerr << "### DH: [a, alpha, d, theta] ###\n" << DH << std::endl;
     std::cerr << "Tbase=" << Tbase << std::endl;
     std::cerr << "Ttool=" << T << std::endl;
@@ -295,7 +296,7 @@ QuikIKPlugin::searchPositionIK(const std::vector<pose_t>& ik_poses,
                                const robot_state_t* context_state) const
 {
     RCLCPP_WARN_STREAM(LOGGER, "### BEGIN: searchPositionIK()");
-    
+
     if (!robot_)
     {
         RCLCPP_ERROR_STREAM(LOGGER, "kinematics not active");
@@ -312,14 +313,14 @@ QuikIKPlugin::searchPositionIK(const std::vector<pose_t>& ik_poses,
     try
     {
         using break_reason_t = quik::BREAKREASON_t;
-        
+
         if (int(ik_seed_state.size()) != robot_->dof)
             throw std::runtime_error("Provided seed_state size["
                                      + std::to_string(ik_seed_state.size())
                                      + "] is not equal to the robot's DOF["
                                      + std::to_string(robot_->dof)
                                      + "]!");
-                                     
+
         const auto     params = param_listener_->get_params();
         const solver_t solver(robot_,
                               int(params.max_iterations),
@@ -338,7 +339,7 @@ QuikIKPlugin::searchPositionIK(const std::vector<pose_t>& ik_poses,
         bool           found = false;
 
         RCLCPP_WARN_STREAM(LOGGER, "### q0 ###\n" << q0);
-        
+
         for (const auto& ik_pose : ik_poses)
         {
             const vector4_t orientation(ik_pose.orientation.x,
@@ -357,7 +358,7 @@ QuikIKPlugin::searchPositionIK(const std::vector<pose_t>& ik_poses,
                                << position);
             RCLCPP_WARN_STREAM(LOGGER, "### desired orientation ###\n"
                                << orientation);
-            
+
             solver.IK(orientation, position, q0, q, e, iter, break_reason);
 
             if (break_reason == break_reason_t::BREAKREASON_TOLERANCE)
@@ -497,25 +498,32 @@ QuikIKPlugin::computeDHParam(const vector3_t& np,
     const auto  nz = T.linear() * nc;   // Transform to the parent link frame.
     auto        nx = np.cross(nz);
     auto        l  = nx.norm();
-    
+
+    std::cerr << "  np    =" << np.transpose()
+              << ", nz=" << nz.transpose()
+              << ", nx=" << nx.transpose() << std::endl;
+
     dh_param_t  dh;
 
     if (l < 0.01)      // Is 'np' parallel to 'nz'?
     {
         nx = nz.cross(t.cross(nz));  // 'nx' is a vertical component of 't'.
         l  = nx.norm();
-        
+
         if (l < 0.01)  // Is 't' parallel to 'nz'?
         {
+            std::cerr << "'t' is parralel to 'nz'." << std::endl;
+
             dh.a      = nz.dot(t);
             dh.alpha  = 0.0;
             dh.lambda = 0.0;
             dh.mu     = 0.0;
-            dh.U      = T;
-            
+            dh.S      = T;
+
             return dh;
         }
-     
+
+        std::cerr << "'np' is parralel to 'nz'." << std::endl;
         nx /= l;
         dh.a      = nx.dot(t);
         dh.alpha  = 0.0;
@@ -531,14 +539,12 @@ QuikIKPlugin::computeDHParam(const vector3_t& np,
         dh.mu     = t.dot(np.cross(nx)) / l;
     }
 
-    transform_t S;
-    S.linear().col(0) = nx;
-    S.linear().col(1) = nz.cross(nx);
-    S.linear().col(2) = nz;
-    S.translation()   = dh.mu * nz;
 
-    dh.U = T * S;
-    
+    // dh.S.linear().col(0) = nx;
+    // dh.S.linear().col(1) = nz.cross(nx);
+    // dh.S.linear().col(2) = nz;
+    dh.S.translation()   = t + dh.mu * nz;
+
     return dh;
 }
 
@@ -583,26 +589,29 @@ QuikIKPlugin::getPositionFKQuik(const std::vector<std::string>& link_names,
 
         std::cerr << "### link_name=" << link_name << ", idx=" << idx
                   << std::endl;
-        
-        const auto  Ti = T.template middleRows<4>(4*idx)
-                       * U_[idx].inverse().matrix();
+
+        const auto  Ti = T.template middleRows<4>(4*idx);
+        const auto& S  = S_[idx];
+        std::cerr << " -- Ti --\n" << Ti
+                  << "\n S=" << S << std::endl;
         vector4_t   orientation;
         vector3_t   position;
-        quik::geometry::hgt2quatpos(Ti, orientation, position);
+        quik::geometry::hgt2quatpos((Ti * S.inverse()).matrix(),
+                                    orientation, position);
 
         pose_t      pose;
         pose.position.x    = position(0);
         pose.position.y    = position(1);
         pose.position.z    = position(2);
-        pose.orientation.x = orientation(1);
-        pose.orientation.y = orientation(2);
-        pose.orientation.z = orientation(3);
-        pose.orientation.w = orientation(0);
+        pose.orientation.x = orientation.x();
+        pose.orientation.y = orientation.y();
+        pose.orientation.z = orientation.z();
+        pose.orientation.w = orientation.w();
         poses.push_back(pose);
 
-        std::cerr << "  " << link_name << ": " << pose << std::endl;
+        std::cerr << " " << link_name << ": " << pose << std::endl;
     }
-    
+
     return true;
 }
 

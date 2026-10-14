@@ -75,7 +75,7 @@ class QuikIKPlugin : public kinematics::KinematicsBase
         double      alpha  = 0.0;  // angle between adjacent joint axes
         double      lambda = 0.0;
         double      mu     = 0.0;
-        transform_t U      = transform_t::Identity();
+        transform_t S      = transform_t::Identity();
     };
     
   public:
@@ -169,7 +169,7 @@ class QuikIKPlugin : public kinematics::KinematicsBase
 
     std::vector<std::string>            joint_names_;
     std::vector<std::string>            link_names_;
-    std::vector<transform_t>            U_;
+    std::vector<transform_t>            S_;
     std::shared_ptr<robot_t>            robot_;
 };
 }  // namespace quik_ik
