@@ -180,7 +180,7 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
                   << std::endl;
 
         T = T * child_link->getJointOriginTransform();
-
+            
         switch (joint->getType())
         {
           case JointModel::REVOLUTE:
@@ -208,8 +208,8 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
             if (joint_num == 0)
             {
                 Tbase    = T;
-                DH(0, 0) = 0.0;
-                DH(0, 1) = 0.0;
+                DH(0, 0) = 0.0;  // zero link length
+                DH(0, 1) = 0.0;  // no correction on direction of joint axis
                 DH(0, 3) = 0.0;
                 mu       = 0.0;
             }
@@ -233,6 +233,7 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
           default:
             break;
         }
+
     }
 
     DH(joint_num-1, 2) = -mu;
@@ -491,12 +492,13 @@ QuikIKPlugin::searchPositionIK(const std::vector<pose_t>& ik_poses,
 }
 
 QuikIKPlugin::dh_param_t
-QuikIKPlugin::computeDHParam(const vector3_t& np,
-                             const vector3_t& nc, const transform_t& T) const
+QuikIKPlugin::computeDHParam(const vector3_t& np, const vector3_t& nc,
+                             const transform_t& T, double mu) const
 {
     const auto  t  = T.translation();
     const auto  nz = T.linear() * nc;   // Transform to the parent link frame.
     auto        nx = np.cross(nz);
+    auto        ny = nz.cross(nx);
     auto        l  = nx.norm();
 
     std::cerr << "  np    =" << np.transpose()
@@ -511,20 +513,12 @@ QuikIKPlugin::computeDHParam(const vector3_t& np,
         l  = nx.norm();
 
         if (l < 0.01)  // Is 't' parallel to 'nz'?
-        {
-            std::cerr << "'t' is parralel to 'nz'." << std::endl;
+            throw std::runtime_error("Invalid link structure: two adjacent axes are colinear.");
 
-            dh.a      = nz.dot(t);
-            dh.alpha  = 0.0;
-            dh.lambda = 0.0;
-            dh.mu     = 0.0;
-            dh.S      = T;
+        std::cerr << "  ('np' is parralel to 'nz'.)" << std::endl;
 
-            return dh;
-        }
-
-        std::cerr << "'np' is parralel to 'nz'." << std::endl;
         nx /= l;
+        ny /= l;
         dh.a      = nx.dot(t);
         dh.alpha  = 0.0;
         dh.lambda = 0.0;
@@ -533,17 +527,18 @@ QuikIKPlugin::computeDHParam(const vector3_t& np,
     else
     {
         nx /= l;
+        ny /= l;
         dh.a      = nx.dot(t);
         dh.alpha  = std::asin(l);
         dh.lambda = t.dot(nz.cross(nx)) / l;
         dh.mu     = t.dot(np.cross(nx)) / l;
     }
 
-
-    // dh.S.linear().col(0) = nx;
-    // dh.S.linear().col(1) = nz.cross(nx);
-    // dh.S.linear().col(2) = nz;
-    dh.S.translation()   = t + dh.mu * nz;
+    const auto  c = std::cos(dh.alpha), s = std::sin(dh.alpha);
+    dh.DS.linear().col(0) =  nx;
+    dh.DS.linear().col(1) =  ny * c + nz * s;
+    dh.DS.linear().col(2) = -ny * s + nz * c;
+    dh.DS.translation()   =  dh.a * nx + dh.lambda * nz;
 
     return dh;
 }

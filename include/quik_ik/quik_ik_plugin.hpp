@@ -75,7 +75,7 @@ class QuikIKPlugin : public kinematics::KinematicsBase
         double      alpha  = 0.0;  // angle between adjacent joint axes
         double      lambda = 0.0;
         double      mu     = 0.0;
-        transform_t S      = transform_t::Identity();
+        transform_t DS     = transform_t::Identity();
     };
     
   public:
