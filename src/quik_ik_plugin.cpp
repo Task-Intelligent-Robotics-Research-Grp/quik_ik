@@ -84,7 +84,7 @@ operator <<(std::ostream& out, const Eigen::Isometry3d& transform)
 {
     const Eigen::Vector3d     t(transform.translation());
     const Eigen::Quaterniond  q(transform.linear());
-    return out << '[' << t(0) << ' ' << t(1) << ' ' << t(2) << ";  "
+    return out << '[' << t.x() << ' ' << t.y() << ' ' << t.z() << ";  "
                << q.x() << ' ' << q.y() << ' ' << q.z() << ' ' << q.w()
                << ']';
 }
@@ -171,6 +171,7 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
     double              mu = 0.0;
     ssize_t             joint_num = 0;
     const link_model_t* child_link;
+    DH.setZero();
     for (const auto joint : jmg->getJointModels())
     {
         std::cerr << "### joint_name=" << joint->getName() << std::endl;
@@ -180,7 +181,7 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
                   << std::endl;
 
         T = T * child_link->getJointOriginTransform();
-            
+
         switch (joint->getType())
         {
           case JointModel::REVOLUTE:
@@ -208,19 +209,19 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
             if (joint_num == 0)
             {
                 Tbase    = T;
-                DH(0, 0) = 0.0;  // zero link length
-                DH(0, 1) = 0.0;  // no correction on direction of joint axis
-                DH(0, 3) = 0.0;
+                // DH(0, 0) = 0.0;  // zero link length
+                // DH(0, 1) = 0.0;  // no correction on direction of joint axis
+                // DH(0, 3) = 0.0;
                 mu       = 0.0;
             }
             else
             {
                 const auto dh = computeDHParam(np, nc, T);
                 std::cerr << "  dh: " << dh << std::endl;
-                DH(joint_num,   0) = dh.a;
-                DH(joint_num,   1) = dh.alpha;
+                DH(joint_num-1, 0) = dh.a;
+                DH(joint_num-1, 1) = dh.alpha;
                 DH(joint_num-1, 2) = dh.lambda - mu;
-                DH(joint_num,   3) = 0.0;
+                DH(joint_num-1, 3) = 0.0;
                 mu                 = dh.mu;
                 S_.push_back(dh.S);
             }
@@ -233,10 +234,9 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
           default:
             break;
         }
-
     }
 
-    DH(joint_num-1, 2) = -mu;
+    // DH(joint_num-1, 2) = -mu;
     link_names_.push_back(child_link->getName());
 
     std::cerr << "### DH: [a, alpha, d, theta] ###\n" << DH << std::endl;
@@ -339,7 +339,7 @@ QuikIKPlugin::searchPositionIK(const std::vector<pose_t>& ik_poses,
         const map_t    q0(ik_seed_state.data(), ssize_t(ik_seed_state.size()));
         bool           found = false;
 
-        RCLCPP_WARN_STREAM(LOGGER, "### q0 ###\n" << q0);
+        RCLCPP_WARN_STREAM(LOGGER, "  q0=" << q0.transpose());
 
         for (const auto& ik_pose : ik_poses)
         {
@@ -355,10 +355,8 @@ QuikIKPlugin::searchPositionIK(const std::vector<pose_t>& ik_poses,
             int             iter;
             break_reason_t  break_reason;
 
-            RCLCPP_WARN_STREAM(LOGGER, "### desired position ###\n"
-                               << position);
-            RCLCPP_WARN_STREAM(LOGGER, "### desired orientation ###\n"
-                               << orientation);
+            RCLCPP_WARN_STREAM(LOGGER, "  desired position   =" << position.transpose());
+            RCLCPP_WARN_STREAM(LOGGER, "  desired orientation=" << orientation.transpose());
 
             solver.IK(orientation, position, q0, q, e, iter, break_reason);
 
@@ -492,8 +490,8 @@ QuikIKPlugin::searchPositionIK(const std::vector<pose_t>& ik_poses,
 }
 
 QuikIKPlugin::dh_param_t
-QuikIKPlugin::computeDHParam(const vector3_t& np, const vector3_t& nc,
-                             const transform_t& T, double mu) const
+QuikIKPlugin::computeDHParam(const vector3_t& np,
+                             const vector3_t& nc, const transform_t& T) const
 {
     const auto  t  = T.translation();
     const auto  nz = T.linear() * nc;   // Transform to the parent link frame.
@@ -522,7 +520,7 @@ QuikIKPlugin::computeDHParam(const vector3_t& np, const vector3_t& nc,
         dh.a      = nx.dot(t);
         dh.alpha  = 0.0;
         dh.lambda = 0.0;
-        dh.mu     = 0.0;
+        dh.mu     = nz.dot(t);
     }
     else
     {
@@ -535,10 +533,10 @@ QuikIKPlugin::computeDHParam(const vector3_t& np, const vector3_t& nc,
     }
 
     const auto  c = std::cos(dh.alpha), s = std::sin(dh.alpha);
-    dh.DS.linear().col(0) =  nx;
-    dh.DS.linear().col(1) =  ny * c + nz * s;
-    dh.DS.linear().col(2) = -ny * s + nz * c;
-    dh.DS.translation()   =  dh.a * nx + dh.lambda * nz;
+    dh.S.linear().col(0) =  nx;
+    dh.S.linear().col(1) =  ny * c + nz * s;
+    dh.S.linear().col(2) = -ny * s + nz * c;
+    dh.S.translation()   =  dh.a * nx + dh.lambda * nz;
 
     return dh;
 }
@@ -595,9 +593,9 @@ QuikIKPlugin::getPositionFKQuik(const std::vector<std::string>& link_names,
                                     orientation, position);
 
         pose_t      pose;
-        pose.position.x    = position(0);
-        pose.position.y    = position(1);
-        pose.position.z    = position(2);
+        pose.position.x    = position.x();
+        pose.position.y    = position.y();
+        pose.position.z    = position.z();
         pose.orientation.x = orientation.x();
         pose.orientation.y = orientation.y();
         pose.orientation.z = orientation.z();

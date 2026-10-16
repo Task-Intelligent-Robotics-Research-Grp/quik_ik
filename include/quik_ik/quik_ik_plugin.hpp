@@ -75,9 +75,9 @@ class QuikIKPlugin : public kinematics::KinematicsBase
         double      alpha  = 0.0;  // angle between adjacent joint axes
         double      lambda = 0.0;
         double      mu     = 0.0;
-        transform_t DS     = transform_t::Identity();
+        transform_t S      = transform_t::Identity();
     };
-    
+
   public:
     const std::vector<std::string>& getJointNames()             const   ;
     const std::vector<std::string>& getLinkNames()              const   ;
@@ -162,7 +162,7 @@ class QuikIKPlugin : public kinematics::KinematicsBase
     bool        getPositionFKMoveIt(const std::vector<std::string>& link_names,
                                     const std::vector<double>& joint_angles,
                                     std::vector<pose_t>& poses) const   ;
-    
+
   private:
     rclcpp::Node::SharedPtr             node_;
     std::shared_ptr<ParamListener>      param_listener_;
