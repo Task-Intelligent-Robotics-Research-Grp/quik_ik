@@ -71,11 +71,11 @@ class QuikIKPlugin : public kinematics::KinematicsBase
   public:
     struct dh_param_t
     {
-        double      a      = 0.0;  // distance between adjacent joint axes
-        double      alpha  = 0.0;  // angle between adjacent joint axes
-        double      lambda = 0.0;
-        double      mu     = 0.0;
-        transform_t S      = transform_t::Identity();
+        double      a     = 0.0;  // distance between adjacent joint axes
+        double      alpha = 0.0;  // angle between adjacent joint axes
+        double      d     = 0.0;
+        double      mu    = 0.0;
+        transform_t S     = transform_t::Identity();
     };
 
   public:
@@ -154,7 +154,7 @@ class QuikIKPlugin : public kinematics::KinematicsBase
 
   private:
     dh_param_t  computeDHParam(const vector3_t& np, const vector3_t& nc,
-                               const transform_t& T)            const   ;
+                               const transform_t& T, double mu) const   ;
     bool        withinLimits(const vector_t& q)                 const   ;
     bool        getPositionFKQuik(const std::vector<std::string>& link_names,
                                   const std::vector<double>& joint_angles,

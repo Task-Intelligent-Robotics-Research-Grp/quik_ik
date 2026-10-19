@@ -93,10 +93,24 @@ std::ostream&
 operator <<(std::ostream& out, const QuikIKPlugin::dh_param_t& dh)
 {
     return out << "a=" << dh.a << ", alpha=" << dh.alpha
-               << ", lambda=" << dh.lambda << ", mu=" << dh.mu
+               << ", d=" << dh.d << ", mu=" << dh.mu
                << "\n      S=" << dh.S
                << "\n      -- S --\n"
                << dh.S.matrix();
+}
+
+Eigen::Matrix4d
+Thd(const Eigen::Array<double, 1, 4>& DH)
+{
+    const auto      ct = std::cos(DH(3)), st = std::sin(DH(3));
+    const auto      ca = std::cos(DH(1)), sa = std::sin(DH(1));
+    const auto      a  = DH(0), d = DH(2);
+    Eigen::Matrix4d A;
+    A << ct, -st*ca,  st*sa, ct*a,
+         st,  ct*ca, -ct*sa, st*a,
+          0,     sa,     ca,    d,
+          0,      0,      0,    1;
+    return A;
 }
 }
 
@@ -178,7 +192,7 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
     {
         child_link = joint->getChildLinkModel();
 
-        std::cerr << "### [" << joint_num
+        std::cerr << "\n### [" << joint_num
                   << "] joint_name=" << joint->getName()
                   << ", child_link=" << child_link->getName() << std::endl;
 
@@ -186,14 +200,13 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
                   << std::endl;
 
         T = T * child_link->getJointOriginTransform();
+        std::cerr << "  T     =" << T << std::endl;
 
         switch (joint->getType())
         {
           case JointModel::REVOLUTE:
           case JointModel::PRISMATIC:
           {
-            std::cerr << "  T     =" << T << std::endl;
-
             link_names_.push_back(child_link->getName());
             link_types[joint_num] = (joint->getType() == JointModel::REVOLUTE ?
                                      quik::JOINT_REVOLUTE :
@@ -218,11 +231,11 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
             }
             else
             {
-                const auto dh = computeDHParam(nz, nc, T);
+                const auto dh = computeDHParam(nz, nc, T, mu);
                 std::cerr << "  dh: " << dh << std::endl;
                 DH(joint_num-1, 0) = dh.a;
                 DH(joint_num-1, 1) = dh.alpha;
-                DH(joint_num-1, 2) = dh.lambda - mu;
+                DH(joint_num-1, 2) = dh.d;
                 DH(joint_num-1, 3) = 0.0;
                 mu                 = dh.mu;
                 S_.push_back(dh.S);
@@ -238,15 +251,18 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
         }
     }
 
-    // DH(joint_num-1, 2) = -mu;
+
     link_names_.push_back(child_link->getName());
 
   //Tbase = transform_t::Identity();
 
-    std::cerr << "### DH: [a, alpha, d, theta] ###\n" << DH << std::endl;
+    std::cerr << "\n### DH: [a, alpha, d, theta] ###\n" << DH << std::endl;
     std::cerr << "Tbase=" << Tbase << std::endl;
     std::cerr << "Ttool=" << T << std::endl;
 
+    for (ssize_t j = 0; j < DH.rows(); ++j)
+        std::cerr << "-- [" << j << "] " << joint_names_[j] << " --\n"
+                  << Thd(DH.row(j)) << std::endl;
     robot_ = make_shared<robot_t>(DH, link_types, qsigns,
                                   Tbase.matrix(), T.matrix());
 
@@ -257,8 +273,8 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
 }
 
 QuikIKPlugin::dh_param_t
-QuikIKPlugin::computeDHParam(const vector3_t& nz,
-                             const vector3_t& n, const transform_t& T) const
+QuikIKPlugin::computeDHParam(const vector3_t& nz, const vector3_t& n,
+                             const transform_t& T, double mu) const
 {
     const auto  t  = T.translation();
     const auto  nc = T.linear() * n;
@@ -266,15 +282,16 @@ QuikIKPlugin::computeDHParam(const vector3_t& nz,
     auto        l  = nx.norm();
     auto        ny = nz.cross(nx);
 
-    std::cerr << "  t=" << t.transpose() << ", nc=" << nc.transpose()
-              << ", nx=" << nx.transpose()
+    std::cerr << "  nz=" << nz.transpose() << ", nc=" << nc.transpose()
+              << ",\n  t="  <<  t.transpose() << ", nx=" << nx.transpose()
               << std::endl;
 
     dh_param_t  dh;
 
     if (l < 0.01)      // Is 'nc' parallel to 'nz'?
     {
-        nx = nz.cross(t.cross(nz));  // 'nx' is a vertical component of 't'.
+      //nx = nz.cross(t.cross(nz));  // 'nx' is a vertical component of 't'.
+        nx = t.cross(nz).cross(nz);  // 'nx' is a vertical component of 't'.
         l  = nx.norm();
 
         if (l < 0.0001)  // Is 't' parallel to 'nz'?
@@ -284,30 +301,26 @@ QuikIKPlugin::computeDHParam(const vector3_t& nz,
 
         nx /= l;
         ny  = nz.cross(nx);
-        dh.a      = nx.dot(t);
-        dh.alpha  = 0.0;
-        dh.lambda = 0.0;
-        dh.mu     = nz.dot(t);
+        dh.a     = nx.dot(t);
+        dh.alpha = 0.0;
+        dh.d     = 0.0;
+        dh.mu    = nz.dot(t);
     }
     else
     {
         nx /= l;
         ny /= l;
-        dh.a      = nx.dot(t);
-        dh.alpha  = std::asin(l);
-        dh.lambda = t.dot(nc.cross(nx)) / l;
-        dh.mu     = t.dot(nz.cross(nx)) / l;
+        dh.a     = nx.dot(t);
+        dh.alpha = std::asin(l);
+        dh.d     = t.dot(nc.cross(nx)) / l - mu;
+        dh.mu    = t.dot(nz.cross(nx)) / l;
     }
 
     const auto  c = std::cos(dh.alpha), s = std::sin(dh.alpha);
     dh.S.linear().col(0) = nx;
     dh.S.linear().col(1) =  c * ny + s * nz;
     dh.S.linear().col(2) = -s * ny + c * nz;
-    dh.S.translation()   =  dh.a * nx + dh.lambda * nz;
-
-    transform_t S = T;
-    S.translation() += T.translation() + dh.mu * nc;
-    std::cerr << "      -- S' --\n" << S.matrix() << std::endl;
+    dh.S.translation()   =  dh.a * nx + (dh.d + mu) * nz;
 
     return dh;
 }
@@ -456,6 +469,9 @@ QuikIKPlugin::searchPositionIK(const std::vector<pose_t>& ik_poses,
     std::vector<pose_t> poses;
     getPositionFKQuik(link_names_, ik_seed_state, poses);
     getPositionFKMoveIt(link_names_, ik_seed_state, poses);
+
+  // DEBUG CODE
+    return false;
 
     try
     {
