@@ -73,30 +73,31 @@ class QuikIKPlugin : public kinematics::KinematicsBase
     {
         double          a     = 0.0;  // distance between adjacent joint axes
         double          alpha = 0.0;  // angle between adjacent joint axes
-        double          d     = 0.0;
-        double          mu    = 0.0;
-        transform_t     S     = transform_t::Identity();
+        double          d     = 0.0;  // link offset along parent joint axis
+        double          mu    = 0.0;  // origin offset along child joint axis
 
-        // transform_t     S() const
-        //                 {
-        //                     // using angle_axis_t = Eigen::AngleAxisd;
-                            
-        //                     // auto S_ = T;
-        //                     // S_.translate(vector3_t(a, 0.0, d))
-        //                     //   .rotate(angle_axis_t(alpha, vector3_t::unitY()));
-        //                     // return S_;
-                            
-        //                     const auto& R = T.linear();
-        //                     const auto  c = std::cos(alpha),
-        //                                 s = std::sin(alpha);
-        //                     transform_t S_;
-        //                     S_.linear().col(0) =  R.col(0);
-        //                     S_.linear().col(1) =  R.col(1) * c + R.col(2) * s;
-        //                     S_.linear().col(2) = -R.col(1) * s + R.col(2) * c;
-        //                     S_.translation()  += d * vector3_t(a, 0.0, d);
+      // Transform from DH frame origin on parent axis to URDF frame origin
+        transform_t     U     = transform_t::Identity();
 
-        //                     return S_;
-        //                 }
+      // Transform from DH frame origin on child axis to URDF frame origin
+        transform_t     S() const
+                        {
+                            // const auto  c = std::cos(alpha),
+                            //             s = std::sin(alpha);
+                            // transform_t T;
+                            // T.linear().col(0) = vector3_t(1,  0, 0);
+                            // T.linear().col(1) = vector3_t(0,  c, s);
+                            // T.linear().col(2) = vector3_t(0, -s, c);
+                            // T.translation()   = vector3_t(a,  0, d);
+                            // return U * T;
+                                
+                            using angle_axis_t = Eigen::AngleAxisd;
+
+                            auto T = U;
+                            T.translate(vector3_t(a, 0.0, d))
+                             .rotate(angle_axis_t(alpha, vector3_t::UnitX()));
+                            return T;
+                        }
     };
 
   public:

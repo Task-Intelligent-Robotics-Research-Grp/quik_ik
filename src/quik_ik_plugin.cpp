@@ -94,9 +94,12 @@ operator <<(std::ostream& out, const QuikIKPlugin::dh_param_t& dh)
 {
     return out << "a=" << dh.a << ", alpha=" << dh.alpha
                << ", d=" << dh.d << ", mu=" << dh.mu
-               << "\n      S=" << dh.S
+               << "\n      U=" << dh.U
+               << "\n      -- U --\n"
+               << dh.U.matrix()
+               << "\n      S=" << dh.S()
                << "\n      -- S --\n"
-               << dh.S.matrix();
+               << dh.S().matrix();
 }
 
 Eigen::Matrix4d
@@ -238,21 +241,23 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
                 DH(joint_num-1, 2) = dh.d;
                 DH(joint_num-1, 3) = 0.0;
                 mu                 = dh.mu;
-                S_.push_back(dh.S);
+                S_.push_back(dh.S());
 
                 if (joint_num == 1)
                 {
-                    
+                    Tbase = Tbase * dh.U;
                 }
+
                 if (joint_num == joint_names_.size() - 1)
                 {
                     DH(joint_num, 0) = 0.0;
                     DH(joint_num, 1) = 0.0;
                     DH(joint_num, 2) = 0.0;
                     DH(joint_num, 3) = 0.0;
+
                     transform_t S;
                     S.linear().col(0) = T.linear().transpose()
-                                      * dh.S.linear().col(0);
+                                      * dh.U.linear().col(0);
                     S.linear().col(1) = nc.cross(S.linear().col(0));
                     S.linear().col(2) = nc;
                     S.translation()   = dh.mu * nc;
@@ -327,17 +332,11 @@ QuikIKPlugin::computeDHParam(const vector3_t& nz, const vector3_t& n,
         dh.mu    = t.dot(nz.cross(nx)) / l;
     }
 
-    // dh.T.linear().col(0) = nx;
-    // dh.T.linear().col(1) = nz.cross(nx);
-    // dh.T.linear().col(2) = nz;
-    // dh.T.translation()   = mu * nz;
-    
-    const auto  ny = nz.cross(nx);
-    const auto  c = std::cos(dh.alpha), s = std::sin(dh.alpha);
-    dh.S.linear().col(0) = nx;
-    dh.S.linear().col(1) =  c * ny + s * nz;
-    dh.S.linear().col(2) = -s * ny + c * nz;
-    dh.S.translation()   = dh.a * nx + (mu + dh.d) * nz;
+  // Compute a transform from DH frame on parent axis to URDF frame.
+    dh.U.linear().col(0) = nx;
+    dh.U.linear().col(1) = nz.cross(nx);
+    dh.U.linear().col(2) = nz;
+    dh.U.translation()   = mu * nz;
 
     return dh;
 }
