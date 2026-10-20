@@ -71,11 +71,32 @@ class QuikIKPlugin : public kinematics::KinematicsBase
   public:
     struct dh_param_t
     {
-        double      a     = 0.0;  // distance between adjacent joint axes
-        double      alpha = 0.0;  // angle between adjacent joint axes
-        double      d     = 0.0;
-        double      mu    = 0.0;
-        transform_t S     = transform_t::Identity();
+        double          a     = 0.0;  // distance between adjacent joint axes
+        double          alpha = 0.0;  // angle between adjacent joint axes
+        double          d     = 0.0;
+        double          mu    = 0.0;
+        transform_t     S     = transform_t::Identity();
+
+        // transform_t     S() const
+        //                 {
+        //                     // using angle_axis_t = Eigen::AngleAxisd;
+                            
+        //                     // auto S_ = T;
+        //                     // S_.translate(vector3_t(a, 0.0, d))
+        //                     //   .rotate(angle_axis_t(alpha, vector3_t::unitY()));
+        //                     // return S_;
+                            
+        //                     const auto& R = T.linear();
+        //                     const auto  c = std::cos(alpha),
+        //                                 s = std::sin(alpha);
+        //                     transform_t S_;
+        //                     S_.linear().col(0) =  R.col(0);
+        //                     S_.linear().col(1) =  R.col(1) * c + R.col(2) * s;
+        //                     S_.linear().col(2) = -R.col(1) * s + R.col(2) * c;
+        //                     S_.translation()  += d * vector3_t(a, 0.0, d);
+
+        //                     return S_;
+        //                 }
     };
 
   public:

@@ -223,7 +223,7 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
           //   column_0 = a:     link length.
           //   column_1 = alpha: angle between previous and current joint axis.
           //   column_2 = d:     link offset along the joint axis.
-          //   column_3 = theta: joint position, theta.
+          //   column_3 = theta: joint position.
             if (joint_num == 0)
             {
                 Tbase = T;
@@ -239,6 +239,25 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
                 DH(joint_num-1, 3) = 0.0;
                 mu                 = dh.mu;
                 S_.push_back(dh.S);
+
+                if (joint_num == 1)
+                {
+                    
+                }
+                if (joint_num == joint_names_.size() - 1)
+                {
+                    DH(joint_num, 0) = 0.0;
+                    DH(joint_num, 1) = 0.0;
+                    DH(joint_num, 2) = 0.0;
+                    DH(joint_num, 3) = 0.0;
+                    transform_t S;
+                    S.linear().col(0) = T.linear().transpose()
+                                      * dh.S.linear().col(0);
+                    S.linear().col(1) = nc.cross(S.linear().col(0));
+                    S.linear().col(2) = nc;
+                    S.translation()   = dh.mu * nc;
+                    S_.push_back(S);
+                }
             }
 
             T.setIdentity();
@@ -250,9 +269,6 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
             break;
         }
     }
-
-
-    link_names_.push_back(child_link->getName());
 
   //Tbase = transform_t::Identity();
 
@@ -276,11 +292,9 @@ QuikIKPlugin::dh_param_t
 QuikIKPlugin::computeDHParam(const vector3_t& nz, const vector3_t& n,
                              const transform_t& T, double mu) const
 {
-    const auto  t  = T.translation();
-    const auto  nc = T.linear() * n;
-    auto        nx = nz.cross(nc);
-    auto        l  = nx.norm();
-    auto        ny = nz.cross(nx);
+    const auto  t  = T.translation(); // Translation from parent to child link.
+    const auto  nc = T.linear() * n;  // Transform into parent joint frame.
+    auto        nx = nz.cross(nc);    // Parent link direction.
 
     std::cerr << "  nz=" << nz.transpose() << ", nc=" << nc.transpose()
               << ",\n  t="  <<  t.transpose() << ", nx=" << nx.transpose()
@@ -288,39 +302,42 @@ QuikIKPlugin::computeDHParam(const vector3_t& nz, const vector3_t& n,
 
     dh_param_t  dh;
 
-    if (l < 0.01)      // Is 'nc' parallel to 'nz'?
+    if (auto l = nx.norm(); l < 0.01)   // Is 'nc' parallel to 'nz'?
     {
-      //nx = nz.cross(t.cross(nz));  // 'nx' is a vertical component of 't'.
-        nx = t.cross(nz).cross(nz);  // 'nx' is a vertical component of 't'.
+        nx = t - t.dot(nz) * nz;        // 'nx' is a vertical component of 't'.
         l  = nx.norm();
 
-        if (l < 0.0001)  // Is 't' parallel to 'nz'?
+        if (l < 0.0001)                 // Is 't' parallel to 'nz'?
             throw std::runtime_error("Invalid link structure: two adjacent axes are colinear.");
 
         std::cerr << "  *** 'nc' is parralel to 'nz'. ***" << std::endl;
 
         nx /= l;
-        ny  = nz.cross(nx);
-        dh.a     = nx.dot(t);
+        dh.a     = t.dot(nx);
         dh.alpha = 0.0;
         dh.d     = 0.0;
-        dh.mu    = nz.dot(t);
+        dh.mu    = t.dot(nz);
     }
     else
     {
         nx /= l;
-        ny /= l;
-        dh.a     = nx.dot(t);
+        dh.a     = t.dot(nx);
         dh.alpha = std::asin(l);
         dh.d     = t.dot(nc.cross(nx)) / l - mu;
         dh.mu    = t.dot(nz.cross(nx)) / l;
     }
 
+    // dh.T.linear().col(0) = nx;
+    // dh.T.linear().col(1) = nz.cross(nx);
+    // dh.T.linear().col(2) = nz;
+    // dh.T.translation()   = mu * nz;
+    
+    const auto  ny = nz.cross(nx);
     const auto  c = std::cos(dh.alpha), s = std::sin(dh.alpha);
     dh.S.linear().col(0) = nx;
     dh.S.linear().col(1) =  c * ny + s * nz;
     dh.S.linear().col(2) = -s * ny + c * nz;
-    dh.S.translation()   =  dh.a * nx + (dh.d + mu) * nz;
+    dh.S.translation()   = dh.a * nx + (mu + dh.d) * nz;
 
     return dh;
 }
