@@ -380,16 +380,20 @@ QuikIKPlugin::getPositionFKQuik(const std::vector<std::string>& link_names,
             return false;
         }
 
-        std::cerr << "### link_name=" << link_name << ", idx=" << idx
+        std::cerr << "### [" << idx << "] link_name=" << link_name
                   << std::endl;
 
         const auto  Ti = T.template middleRows<4>(4*idx);
         const auto& S  = S_[idx];
+        const auto  TiSinv = Ti * S.inverse();
         std::cerr << " -- Ti --\n" << Ti
-                  << "\n S=" << S << std::endl;
+                  << "\n -- S --\n" << S.matrix()
+                  << "\n -- Sinv --\n" << S.inverse().matrix()
+                  << "\n -- TiSinv --\n" << TiSinv.matrix()
+                  << std::endl;
         vector4_t   orientation;
         vector3_t   position;
-        quik::geometry::hgt2quatpos((Ti * S.inverse()).matrix(),
+        quik::geometry::hgt2quatpos(TiSinv.matrix(),
                                     orientation, position);
 
         pose_t      pose;
