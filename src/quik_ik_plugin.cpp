@@ -97,6 +97,8 @@ operator <<(std::ostream& out, const QuikIKPlugin::dh_param_t& dh)
                << "\n      U=" << dh.U
                << "\n      -- U --\n"
                << dh.U.matrix()
+               << "\n      -- D --\n"
+               << dh.D().matrix()
                << "\n      S=" << dh.S()
                << "\n      -- S --\n"
                << dh.S().matrix();
@@ -284,6 +286,7 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
     for (ssize_t j = 0; j < DH.rows(); ++j)
         std::cerr << "-- [" << j << "] " << joint_names_[j] << " --\n"
                   << Thd(DH.row(j)) << std::endl;
+
     robot_ = make_shared<robot_t>(DH, link_types, qsigns,
                                   Tbase.matrix(), T.matrix());
 

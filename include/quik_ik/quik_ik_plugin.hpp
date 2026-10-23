@@ -79,6 +79,16 @@ class QuikIKPlugin : public kinematics::KinematicsBase
       // Transform from DH frame origin on parent axis to URDF frame origin
         transform_t     U     = transform_t::Identity();
 
+        transform_t     D() const
+                        {
+                            using angle_axis_t = Eigen::AngleAxisd;
+
+                            auto T = transform_t::Identity();
+                            T.translate(vector3_t(a, 0.0, d))
+                             .rotate(angle_axis_t(alpha, vector3_t::UnitX()));
+                            return T;
+                        }
+
       // Transform from DH frame origin on child axis to URDF frame origin
         transform_t     S() const
                         {
@@ -90,13 +100,15 @@ class QuikIKPlugin : public kinematics::KinematicsBase
                             // T.linear().col(2) = vector3_t(0, -s, c);
                             // T.translation()   = vector3_t(a,  0, d);
                             // return U * T;
-                                
-                            using angle_axis_t = Eigen::AngleAxisd;
 
-                            auto T = U;
-                            T.translate(vector3_t(a, 0.0, d))
-                             .rotate(angle_axis_t(alpha, vector3_t::UnitX()));
-                            return T;
+                            // using angle_axis_t = Eigen::AngleAxisd;
+
+                            // auto T = U;
+                            // T.translate(vector3_t(a, 0.0, d))
+                            //  .rotate(angle_axis_t(alpha, vector3_t::UnitX()));
+                            // return T;
+
+                            return U * D();
                         }
     };
 
