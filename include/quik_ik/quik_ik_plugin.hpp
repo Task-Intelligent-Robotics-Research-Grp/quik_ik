@@ -71,20 +71,23 @@ class QuikIKPlugin : public kinematics::KinematicsBase
   public:
     struct dh_param_t
     {
-        double          a     = 0.0;  // distance between adjacent joint axes
-        double          alpha = 0.0;  // angle between adjacent joint axes
-        double          d     = 0.0;  // link offset along parent joint axis
-        double          mu    = 0.0;  // origin offset along child joint axis
+        double          a      = 0.0;  // distance between adjacent joint axes
+        double          alpha  = 0.0;  // angle between adjacent joint axes
+        double          d      = 0.0;  // link offset along parent joint axis
+        double          mu     = 0.0;  // origin offset along child joint axis
+        double          theta0 = 0.0;
+        vector3_t       ip     = vector3_t::Zero();
 
       // Transform from DH frame origin on parent axis to URDF frame origin
-        transform_t     U     = transform_t::Identity();
+        transform_t     U      = transform_t::Identity();
 
         transform_t     D() const
                         {
                             using angle_axis_t = Eigen::AngleAxisd;
 
                             auto T = transform_t::Identity();
-                            T.translate(vector3_t(a, 0.0, d))
+                            T.rotate(angle_axis_t(theta0, vector3_t::UnitZ()))
+                             .translate(vector3_t(a, 0.0, d))
                              .rotate(angle_axis_t(alpha, vector3_t::UnitX()));
                             return T;
                         }
@@ -188,7 +191,8 @@ class QuikIKPlugin : public kinematics::KinematicsBase
 
   private:
     dh_param_t  computeDHParam(const vector3_t& np, const vector3_t& nc,
-                               const transform_t& T, double mu) const   ;
+                               const transform_t& T, const vector3_t& ip,
+                               double mu)                       const   ;
     bool        withinLimits(const vector_t& q)                 const   ;
     bool        getPositionFKQuik(const std::vector<std::string>& link_names,
                                   const std::vector<double>& joint_angles,
