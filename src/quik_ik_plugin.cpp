@@ -92,8 +92,9 @@ operator <<(std::ostream& out, const Eigen::Isometry3d& transform)
 std::ostream&
 operator <<(std::ostream& out, const QuikIKPlugin::dh_param_t& dh)
 {
-    return out << "a=" << dh.a << ", alpha=" << dh.alpha
-               << ", d=" << dh.d << ", mu=" << dh.mu
+    return out << "theta0=" << dh.theta0 << ", a=" << dh.a
+               << ", d=" << dh.d << ", alpha=" << dh.alpha
+               << ", mu=" << dh.mu
                << "\n      U=" << dh.U
                << "\n      -- U --\n"
                << dh.U.matrix()
@@ -188,8 +189,7 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
     vector_t            qsigns(joint_names_.size());
     transform_t         T = transform_t::Identity();
     transform_t         Tbase = transform_t::Identity();
-    vector3_t           k;
-    vector3_t           ip;
+    vector3_t           ip, kp;
     double              mu = 0.0;
     ssize_t             joint_num = 0;
     const link_model_t* child_link;
@@ -219,17 +219,17 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
                                      quik::JOINT_PRISMATIC);
             qsigns[joint_num] = 1;
 
-            const auto kc = (joint->getType() == JointModel::REVOLUTE ?
-                             static_cast<const RevoluteJointModel*>(joint)
-                             ->getAxis().normalized() :
-                             static_cast<const PrismaticJointModel*>(joint)
-                             ->getAxis().normalized());
+            const auto k = (joint->getType() == JointModel::REVOLUTE ?
+                            static_cast<const RevoluteJointModel*>(joint)
+                            ->getAxis().normalized() :
+                            static_cast<const PrismaticJointModel*>(joint)
+                            ->getAxis().normalized());
 
           // Setup DH parameters
           //   column_0 = a:      link length
-          //   column_1 = alpha:  angle between previous and current joint axis
-          //   column_2 = d:      link offset along the joint axis
-          //   column_3 = theta0: joint position
+          //   column_1 = alpha:  angle between parent and child joint axis
+          //   column_2 = d:      link offset along the parent joint axis
+          //   column_3 = theta0: parent joint reference position
             if (joint_num == 0)
             {
                 Tbase = T;
@@ -238,7 +238,7 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
             }
             else
             {
-                const auto dh = computeDHParam(k, kc, T, ip, mu);
+                const auto dh = computeDHParam(k, ip, kp, T, mu);
                 std::cerr << "  dh: " << dh << std::endl;
                 DH(joint_num-1, 0) = dh.a;
                 DH(joint_num-1, 1) = dh.alpha;
@@ -261,17 +261,16 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
                     DH(joint_num, 3) = 0.0;
 
                     transform_t S;
-                    S.linear().col(0) = T.linear().transpose()
-                                      * dh.U.linear().col(0);
-                    S.linear().col(1) = kc.cross(S.linear().col(0));
-                    S.linear().col(2) = kc;
-                    S.translation()   = dh.mu * kc;
+                    S.linear().col(0) = ip;
+                    S.linear().col(1) = k.cross(ip);
+                    S.linear().col(2) = k;
+                    S.translation()   = mu * k;
                     S_.push_back(S);
                 }
             }
 
             T.setIdentity();
-            k = kc;
+            kp = k;
             ++joint_num;
             break;
           }
@@ -300,52 +299,61 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
 }
 
 QuikIKPlugin::dh_param_t
-QuikIKPlugin::computeDHParam(const vector3_t& k, const vector3_t& kc,
-                             const transform_t& T, const vector3_t& ip,
-                             double mu) const
+QuikIKPlugin::computeDHParam(const vector3_t& k,
+                             const vector3_t& ip, const vector3_t& kp,
+                             const transform_t& T, double mu) const
 {
-    const auto  t = T.translation();  // Translation from parent to child link.
-    const auto  n = T.linear() * kc;  // Transform into parent joint frame.
-    auto        i = k.cross(n);       // Parent link direction.
+    const auto  t  = T.translation();  // Translation from parent to child link
+    const auto  kc = T.linear() * k;   // Transform into parent joint frame.
+    auto        ic = kp.cross(kc);     // Parent link direction.
 
-    std::cerr << "  k=" << k.transpose() << ", n=" << n.transpose()
-              << ",\n  t="  <<  t.transpose() << ", i=" << i.transpose()
+    std::cerr << "  kc=" << kc.transpose() << ", kp=" << kp.transpose()
+              << ",\n  t="  <<  t.transpose() << ", ic=" << ic.transpose()
               << std::endl;
 
     dh_param_t  dh;
 
-    if (auto l = i.norm(); l < 0.01)  // Is 'n' parallel to 'k'?
+    if (auto l = ic.norm(); l < 0.01)  // Is 'kc' parallel to 'kp'?
     {
-        i = t - t.dot(k) * k;         // 'i' is a vertical component of 't'.
-        l = i.norm();
+        ic = t - t.dot(kp) * kp;       // 'ic' is a vertical component of 't'.
+        l  = ic.norm();
 
         if (l < 0.0001)               // Is 't' parallel to 'k'?
             throw std::runtime_error("Invalid link structure: two adjacent axes are colinear.");
 
-        std::cerr << "  *** 'n' is parralel to 'k'. ***" << std::endl;
+        std::cerr << "  *** 'kc' is parralel to 'kp'. ***" << std::endl;
 
-        i /= l;
-        dh.a     = t.dot(i);
+        ic /= l;
+        dh.a     = t.dot(ic);
         dh.alpha = 0.0;
         dh.d     = 0.0;
-        dh.mu    = t.dot(k);
+        dh.mu    = mu - t.dot(kc);
     }
     else
     {
-        i /= l;
-        dh.a     = t.dot(i);
+        ic /= l;
+        dh.a     = t.dot(ic);
         dh.alpha = std::asin(l);
-        dh.d     = t.dot(n.cross(i)) / l - mu;
-        dh.mu    = t.dot(k.cross(i)) / l;
+        dh.d     = t.dot(kp.cross(ic)) / l - mu;
+        dh.mu    = t.dot(kc.cross(ic)) / l;
     }
 
-  // Compute a transform from DH frame on parent axis to URDF frame.
-    dh.U.linear().col(0) = i;
-    dh.U.linear().col(1) = k.cross(i);
-    dh.U.linear().col(2) = k;
-    dh.U.translation()   = mu * k;
-    dh.theta0 = (ip.dot(ip) == 0.0 ? 0.0 : std::acos(ip.dot(i)));
-    dh.ip = T.linear().transpose() * i;
+    if (ip.dot(ip) < 0.01)              // Is 'ic' the first active joint?
+    {
+        dh.theta0 = 0.0;
+        dh.U.linear().col(0) = ic;
+    }
+    else
+    {
+        dh.theta0 = std::acos(ip.dot(ic));
+        dh.U.linear().col(0) = ip;
+    }
+
+    dh.U.linear().col(1) = kp.cross(dh.U.linear().col(0));
+    dh.U.linear().col(2) = kp;
+    dh.U.translation()   = mu * kp;
+
+    dh.ip = T.linear().transpose() * ic;
 
     return dh;
 }

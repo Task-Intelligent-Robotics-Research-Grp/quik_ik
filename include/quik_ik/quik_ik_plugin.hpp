@@ -71,14 +71,13 @@ class QuikIKPlugin : public kinematics::KinematicsBase
   public:
     struct dh_param_t
     {
-        double          a      = 0.0;  // distance between adjacent joint axes
-        double          alpha  = 0.0;  // angle between adjacent joint axes
-        double          d      = 0.0;  // link offset along parent joint axis
-        double          mu     = 0.0;  // origin offset along child joint axis
         double          theta0 = 0.0;
+        double          a      = 0.0;  // distance between adjacent joint axes
+        double          d      = 0.0;  // link offset along parent joint axis
+        double          alpha  = 0.0;  // angle between adjacent joint axes
+        double          mu     = 0.0;  // origin offset along child joint axis
         vector3_t       ip     = vector3_t::Zero();
 
-      // Transform from DH frame origin on parent axis to URDF frame origin
         transform_t     U      = transform_t::Identity();
 
         transform_t     D() const
@@ -95,22 +94,6 @@ class QuikIKPlugin : public kinematics::KinematicsBase
       // Transform from DH frame origin on child axis to URDF frame origin
         transform_t     S() const
                         {
-                            // const auto  c = std::cos(alpha),
-                            //             s = std::sin(alpha);
-                            // transform_t T;
-                            // T.linear().col(0) = vector3_t(1,  0, 0);
-                            // T.linear().col(1) = vector3_t(0,  c, s);
-                            // T.linear().col(2) = vector3_t(0, -s, c);
-                            // T.translation()   = vector3_t(a,  0, d);
-                            // return U * T;
-
-                            // using angle_axis_t = Eigen::AngleAxisd;
-
-                            // auto T = U;
-                            // T.translate(vector3_t(a, 0.0, d))
-                            //  .rotate(angle_axis_t(alpha, vector3_t::UnitX()));
-                            // return T;
-
                             return U * D();
                         }
     };
@@ -190,9 +173,9 @@ class QuikIKPlugin : public kinematics::KinematicsBase
                           const robot_state_t* context_state=nullptr) const;
 
   private:
-    dh_param_t  computeDHParam(const vector3_t& np, const vector3_t& nc,
-                               const transform_t& T, const vector3_t& ip,
-                               double mu)                       const   ;
+    dh_param_t  computeDHParam(const vector3_t& k,
+                               const vector3_t& ip, const vector3_t& kp,
+                               const transform_t& T, double mu) const   ;
     bool        withinLimits(const vector_t& q)                 const   ;
     bool        getPositionFKQuik(const std::vector<std::string>& link_names,
                                   const std::vector<double>& joint_angles,
