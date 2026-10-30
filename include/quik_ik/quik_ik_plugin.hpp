@@ -72,8 +72,8 @@ class QuikIKPlugin : public kinematics::KinematicsBase
     struct dh_param_t
     {
         double          theta0 = 0.0;
-        double          a      = 0.0;  // distance between adjacent joint axes
         double          d      = 0.0;  // link offset along parent joint axis
+        double          a      = 0.0;  // distance between adjacent joint axes
         double          alpha  = 0.0;  // angle between adjacent joint axes
         double          mu     = 0.0;  // origin offset along child joint axis
         vector3_t       ip     = vector3_t::Zero();
@@ -82,12 +82,15 @@ class QuikIKPlugin : public kinematics::KinematicsBase
 
         transform_t     D() const
                         {
-                            using angle_axis_t = Eigen::AngleAxisd;
-
-                            auto T = transform_t::Identity();
-                            T.rotate(angle_axis_t(theta0, vector3_t::UnitZ()))
-                             .translate(vector3_t(a, 0.0, d))
-                             .rotate(angle_axis_t(alpha, vector3_t::UnitX()));
+                            const auto  ct = std::cos(theta0),
+                                        st = std::sin(theta0);
+                            const auto  ca = std::cos(alpha),
+                                        sa = std::sin(alpha);
+                            transform_t T;
+                            T.matrix() << ct, -st*ca,  st*sa, ct*a,
+                                          st,  ct*ca, -ct*sa, st*a,
+                                           0,     sa,     ca,    d,
+                                           0,      0,      0,    1;
                             return T;
                         }
 

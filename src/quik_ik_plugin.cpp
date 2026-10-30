@@ -105,18 +105,25 @@ operator <<(std::ostream& out, const QuikIKPlugin::dh_param_t& dh)
                << dh.S().matrix();
 }
 
-Eigen::Matrix4d
-Thd(const Eigen::Array<double, 1, 4>& DH)
+std::ostream&
+operator <<(std::ostream& out, const Eigen::Array<double, 1, 4>& DH)
 {
-    const auto      ct = std::cos(DH(3)), st = std::sin(DH(3));
-    const auto      ca = std::cos(DH(1)), sa = std::sin(DH(1));
-    const auto      a  = DH(0), d = DH(2);
-    Eigen::Matrix4d A;
-    A << ct, -st*ca,  st*sa, ct*a,
-         st,  ct*ca, -ct*sa, st*a,
-          0,     sa,     ca,    d,
-          0,      0,      0,    1;
-    return A;
+    QuikIKPlugin::dh_param_t  dh;
+    dh.theta0 = DH(3);
+    dh.d      = DH(2);
+    dh.a      = DH(0);
+    dh.alpha  = DH(1);
+    return out << dh.D().matrix();
+
+    // const auto      ct = std::cos(DH(3)), st = std::sin(DH(3));
+    // const auto      ca = std::cos(DH(1)), sa = std::sin(DH(1));
+    // const auto      a  = DH(0), d = DH(2);
+    // Eigen::Matrix4d A;
+    // A << ct, -st*ca,  st*sa, ct*a,
+    //      st,  ct*ca, -ct*sa, st*a,
+    //       0,     sa,     ca,    d,
+    //       0,      0,      0,    1;
+    // return A;
 }
 }
 
@@ -192,11 +199,11 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
     vector3_t           ip, kp;
     double              mu = 0.0;
     ssize_t             joint_num = 0;
-    const link_model_t* child_link;
+
     DH.setZero();
     for (const auto joint : jmg->getJointModels())
     {
-        child_link = joint->getChildLinkModel();
+        const auto* child_link = joint->getChildLinkModel();
 
         std::cerr << "\n### [" << joint_num
                   << "] joint_name=" << joint->getName()
@@ -225,32 +232,34 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
                             static_cast<const PrismaticJointModel*>(joint)
                             ->getAxis().normalized());
 
-          // Setup DH parameters
-          //   column_0 = a:      link length
-          //   column_1 = alpha:  angle between parent and child joint axis
-          //   column_2 = d:      link offset along the parent joint axis
-          //   column_3 = theta0: parent joint reference position
-            if (joint_num == 0)
+            if (joint_num > 0)
             {
-                Tbase = T;
-                ip    = vector3_t::Zero();
-                mu    = 0.0;
-            }
-            else
-            {
-                const auto dh = computeDHParam(k, ip, kp, T, mu);
-                std::cerr << "  dh: " << dh << std::endl;
-                DH(joint_num-1, 0) = dh.a;
-                DH(joint_num-1, 1) = dh.alpha;
-                DH(joint_num-1, 2) = dh.d;
-                DH(joint_num-1, 3) = dh.theta0;
-                ip                 = dh.ip;
-                mu                 = dh.mu;
-                S_.push_back(dh.S());
-
-                if (joint_num == 1)
+              // Setup DH parameters
+              //   column_0 = a:      link length
+              //   column_1 = alpha:  angle between parent and child joint axis
+              //   column_2 = d:      link offset along the parent joint axis
+              //   column_3 = theta0: parent joint reference position
+                try
                 {
-                    Tbase = Tbase * dh.U;
+                    const auto dh = computeDHParam(k, kp, ip, T, mu);
+                    std::cerr << "  dh: " << dh << std::endl;
+                    DH(joint_num-1, 0) = dh.a;
+                    DH(joint_num-1, 1) = dh.alpha;
+                    DH(joint_num-1, 2) = dh.d;
+                    DH(joint_num-1, 3) = dh.theta0;
+                    ip                 = dh.ip;
+                    mu                 = dh.mu;
+                    S_.push_back(dh.S());
+
+                    if (joint_num == 1)
+                    {
+                        Tbase = Tbase * dh.U;
+                    }
+                }
+                catch (const std::exception& err)
+                {
+                    RCLCPP_WARN_STREAM(LOGGER, err.what());
+                    return false;
                 }
 
                 if (joint_num == joint_names_.size() - 1)
@@ -279,15 +288,13 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
         }
     }
 
-  //Tbase = transform_t::Identity();
-
     std::cerr << "\n### DH: [a, alpha, d, theta] ###\n" << DH << std::endl;
     std::cerr << "Tbase=" << Tbase << std::endl;
     std::cerr << "Ttool=" << T << std::endl;
 
     for (ssize_t j = 0; j < DH.rows(); ++j)
         std::cerr << "-- [" << j << "] " << joint_names_[j] << " --\n"
-                  << Thd(DH.row(j)) << std::endl;
+                  << DH.row(j) << std::endl;
 
     robot_ = make_shared<robot_t>(DH, link_types, qsigns,
                                   Tbase.matrix(), T.matrix());
@@ -299,17 +306,13 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
 }
 
 QuikIKPlugin::dh_param_t
-QuikIKPlugin::computeDHParam(const vector3_t& k,
-                             const vector3_t& ip, const vector3_t& kp,
+QuikIKPlugin::computeDHParam(const vector3_t& k, const vector3_t& kp,
+                             const vector3_t& ip,
                              const transform_t& T, double mu) const
 {
     const auto  t  = T.translation();  // Translation from parent to child link
     const auto  kc = T.linear() * k;   // Transform into parent joint frame.
     auto        ic = kp.cross(kc);     // Parent link direction.
-
-    std::cerr << "  kc=" << kc.transpose() << ", kp=" << kp.transpose()
-              << ",\n  t="  <<  t.transpose() << ", ic=" << ic.transpose()
-              << std::endl;
 
     dh_param_t  dh;
 
@@ -321,24 +324,22 @@ QuikIKPlugin::computeDHParam(const vector3_t& k,
         if (l < 0.0001)               // Is 't' parallel to 'k'?
             throw std::runtime_error("Invalid link structure: two adjacent axes are colinear.");
 
-        std::cerr << "  *** 'kc' is parralel to 'kp'. ***" << std::endl;
-
         ic /= l;
         dh.a     = t.dot(ic);
         dh.alpha = 0.0;
-        dh.d     = 0.0;
-        dh.mu    = mu - t.dot(kc);
+        dh.d     = -mu;
+        dh.mu    = -t.dot(kc);
     }
     else
     {
         ic /= l;
         dh.a     = t.dot(ic);
         dh.alpha = std::asin(l);
-        dh.d     = t.dot(kp.cross(ic)) / l - mu;
-        dh.mu    = t.dot(kc.cross(ic)) / l;
+        dh.d     = t.dot(kc.cross(ic)) / l - mu;
+        dh.mu    = t.dot(kp.cross(ic)) / l;
     }
 
-    if (ip.dot(ip) < 0.01)              // Is 'ic' the first active joint?
+    if (ip.dot(ip) < 0.01)              // Is 'kp' the first active joint?
     {
         dh.theta0 = 0.0;
         dh.U.linear().col(0) = ic;
@@ -355,6 +356,10 @@ QuikIKPlugin::computeDHParam(const vector3_t& k,
 
     dh.ip = T.linear().transpose() * ic;
 
+    std::cerr << "  kp=" << kp.transpose() << ", ip=" << ip.transpose()
+              << ",\n  kc=" << kc.transpose() << ", ic="  <<  ic.transpose()
+              << ",\n  t=" << t.transpose()
+              << std::endl;
     return dh;
 }
 
@@ -397,20 +402,15 @@ QuikIKPlugin::getPositionFKQuik(const std::vector<std::string>& link_names,
             return false;
         }
 
-        std::cerr << "### [" << idx << "] link_name=" << link_name
-                  << std::endl;
-
         const auto  Tdh = T.template middleRows<4>(4*idx);
-        const auto& S = S_[idx];
-        const auto  TdhSinv = Tdh * S.inverse();
-        std::cerr << " -- Tdh --\n" << Tdh
-                  << "\n -- S --\n" << S.matrix()
-                  // << "\n -- Sinv --\n" << S.inverse().matrix()
-                  // << "\n -- TiSinv --\n" << TiSinv.matrix()
-                  << std::endl;
+        const auto& S   = S_[idx];
+        // std::cerr << "### [" << idx << "] link_name=" << link_name
+        //           << "\n -- Tdh --\n" << Tdh
+        //           << "\n -- S --\n" << S.matrix()
+        //           << std::endl;
         vector4_t   orientation;
         vector3_t   position;
-        quik::geometry::hgt2quatpos(TdhSinv.matrix(),
+        quik::geometry::hgt2quatpos((Tdh * S.inverse()).matrix(),
                                     orientation, position);
 
         pose_t      pose;
