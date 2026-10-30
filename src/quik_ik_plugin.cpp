@@ -190,13 +190,19 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
         if (joint->getType() == JointModel::REVOLUTE ||
             joint->getType() == JointModel::PRISMATIC)
             joint_names_.push_back(joint->getName());
+    if (joint_names_.size() == 0)
+    {
+        RCLCPP_ERROR_STREAM(LOGGER, "no active joints in joint model group["
+                            << group_name << ']');
+        return false;
+    }
 
     dh_params_t         DH(joint_names_.size(), 4);
     link_types_t        link_types(joint_names_.size());
     vector_t            qsigns(joint_names_.size());
     transform_t         T = transform_t::Identity();
     transform_t         Tbase = transform_t::Identity();
-    vector3_t           ip, kp;
+    vector3_t           ip = vector3_t::Zero(), kp = vector3_t::Zero();
     double              mu = 0.0;
     ssize_t             joint_num = 0;
 
@@ -232,7 +238,11 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
                             static_cast<const PrismaticJointModel*>(joint)
                             ->getAxis().normalized());
 
-            if (joint_num > 0)
+            if (joint_num == 0)
+            {
+                Tbase = T;
+            }
+            else
             {
               // Setup DH parameters
               //   column_0 = a:      link length
@@ -252,29 +262,12 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
                     S_.push_back(dh.S());
 
                     if (joint_num == 1)
-                    {
                         Tbase = Tbase * dh.U;
-                    }
                 }
                 catch (const std::exception& err)
                 {
-                    RCLCPP_WARN_STREAM(LOGGER, err.what());
+                    RCLCPP_ERROR_STREAM(LOGGER, err.what());
                     return false;
-                }
-
-                if (joint_num == joint_names_.size() - 1)
-                {
-                    DH(joint_num, 0) = 0.0;
-                    DH(joint_num, 1) = 0.0;
-                    DH(joint_num, 2) = 0.0;
-                    DH(joint_num, 3) = 0.0;
-
-                    transform_t S;
-                    S.linear().col(0) = ip;
-                    S.linear().col(1) = k.cross(ip);
-                    S.linear().col(2) = k;
-                    S.translation()   = mu * k;
-                    S_.push_back(S);
                 }
             }
 
@@ -287,6 +280,18 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
             break;
         }
     }
+
+    DH(joint_num-1, 0) = 0.0;
+    DH(joint_num-1, 1) = 0.0;
+    DH(joint_num-1, 2) = 0.0;
+    DH(joint_num-1, 3) = 0.0;
+
+    transform_t S;
+    S.linear().col(0) = ip;
+    S.linear().col(1) = kp.cross(ip);
+    S.linear().col(2) = kp;
+    S.translation()   = mu * kp;
+    S_.push_back(S);
 
     std::cerr << "\n### DH: [a, alpha, d, theta] ###\n" << DH << std::endl;
     std::cerr << "Tbase=" << Tbase << std::endl;
