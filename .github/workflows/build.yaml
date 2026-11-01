@@ -42,7 +42,7 @@ jobs:
     - name: Patch libconfig
       run: |
         cd ${{github.workspace}}/quik
-	patch < ${{github.workspace}}/quik_ik/quik.patch
+        patch < ${{github.workspace}}/quik_ik/quik.patch
 
     - name: Init workspace
       run: |
