@@ -59,14 +59,6 @@ class QuikIKPlugin : public kinematics::KinematicsBase
     using robot_t       = quik::Robot<>;
     using solver_t      = quik::IKSolver<>;
     using link_type_t   = quik::JOINTTYPE_t;
-    using link_types_t  = Eigen::VectorX<link_type_t>;
-    using dh_params_t   = Eigen::Array<double, Eigen::Dynamic, 4>;
-    using transform_t   = Eigen::Isometry3d;
-    using vector3_t     = Eigen::Vector3d;
-    using vector4_t     = Eigen::Vector4d;
-    using vector6_t     = Eigen::Vector<double, 6>;
-    using vector_t      = Eigen::VectorXd;
-    using map_t         = Eigen::Map<const vector_t>;
 
   public:
     struct dh_param_t
@@ -76,29 +68,25 @@ class QuikIKPlugin : public kinematics::KinematicsBase
         double          a      = 0.0;  // distance between adjacent joint axes
         double          alpha  = 0.0;  // angle between adjacent joint axes
         double          mu     = 0.0;  // origin offset along child joint axis
-        vector3_t       ip     = vector3_t::Zero();
+        Eigen::Vector3d ip     = Eigen::Vector3d::Zero();
+        Eigen::Isometry3d U    = Eigen::Isometry3d::Identity();
 
-        transform_t     U      = transform_t::Identity();
-
-        transform_t     D() const
-                        {
-                            const auto  ct = std::cos(theta0),
-                                        st = std::sin(theta0);
-                            const auto  ca = std::cos(alpha),
-                                        sa = std::sin(alpha);
-                            transform_t T;
-                            T.matrix() << ct, -st*ca,  st*sa, ct*a,
-                                          st,  ct*ca, -ct*sa, st*a,
-                                           0,     sa,     ca,    d,
-                                           0,      0,      0,    1;
-                            return T;
-                        }
+        Eigen::Isometry3d       D() const
+                                {
+                                    const auto  ct = std::cos(theta0),
+                                                st = std::sin(theta0);
+                                    const auto  ca = std::cos(alpha),
+                                                sa = std::sin(alpha);
+                                    Eigen::Isometry3d   T;
+                                    T.matrix() << ct, -st*ca,  st*sa, ct*a,
+                                                  st,  ct*ca, -ct*sa, st*a,
+                                                   0,     sa,     ca,    d,
+                                                   0,      0,      0,    1;
+                                    return T;
+                                }
 
       // Transform from DH frame origin on child axis to URDF frame origin
-        transform_t     S() const
-                        {
-                            return U * D();
-                        }
+        Eigen::Isometry3d       S()             const   { return U * D(); }
     };
 
   public:
@@ -176,16 +164,18 @@ class QuikIKPlugin : public kinematics::KinematicsBase
                           const robot_state_t* context_state=nullptr) const;
 
   private:
-    dh_param_t  computeDHParam(const vector3_t& k,
-                               const vector3_t& ip, const vector3_t& kp,
-                               const transform_t& T, double mu) const   ;
-    bool        withinLimits(const vector_t& q)                 const   ;
+    dh_param_t  computeDHParam(const Eigen::Vector3d& k,
+                               const Eigen::Vector3d& ip,
+                               const Eigen::Vector3d& kp,
+                               double mu,
+                               const Eigen::Isometry3d& T)      const   ;
     bool        getPositionFKQuik(const std::vector<std::string>& link_names,
                                   const std::vector<double>& joint_angles,
                                   std::vector<pose_t>& poses)   const   ;
     bool        getPositionFKMoveIt(const std::vector<std::string>& link_names,
                                     const std::vector<double>& joint_angles,
                                     std::vector<pose_t>& poses) const   ;
+    bool        withinLimits(const Eigen::VectorXd& q)          const   ;
 
   private:
     rclcpp::Node::SharedPtr             node_;
@@ -193,7 +183,7 @@ class QuikIKPlugin : public kinematics::KinematicsBase
 
     std::vector<std::string>            joint_names_;
     std::vector<std::string>            link_names_;
-    std::vector<transform_t>            S_;
+    std::vector<Eigen::Isometry3d>      S_;
     std::shared_ptr<robot_t>            robot_;
 };
 }  // namespace quik_ik

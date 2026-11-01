@@ -31,6 +31,8 @@
 //
 // Author: Toshio Ueshiba (t.ueshiba@aist.go.jp)
 //
+#define DEBUG
+
 #include <quik_ik/quik_ik_parameters.hpp>
 #include <quik_ik/quik_ik_plugin.hpp>
 
@@ -48,7 +50,7 @@ namespace quik_ik
 {
 namespace
 {
-auto const LOGGER = rclcpp::get_logger("quik_ik");
+const auto LOGGER = rclcpp::get_logger("quik_ik");
 
 template <class T> std::ostream&
 operator <<(std::ostream& out, const std::vector<T>& v)
@@ -95,35 +97,9 @@ operator <<(std::ostream& out, const QuikIKPlugin::dh_param_t& dh)
     return out << "theta0=" << dh.theta0 << ", a=" << dh.a
                << ", d=" << dh.d << ", alpha=" << dh.alpha
                << ", mu=" << dh.mu
-               << "\n      U=" << dh.U
-               << "\n      -- U --\n"
-               << dh.U.matrix()
-               << "\n      -- D --\n"
-               << dh.D().matrix()
-               << "\n      S=" << dh.S()
-               << "\n      -- S --\n"
-               << dh.S().matrix();
-}
-
-std::ostream&
-operator <<(std::ostream& out, const Eigen::Array<double, 1, 4>& DH)
-{
-    QuikIKPlugin::dh_param_t  dh;
-    dh.theta0 = DH(3);
-    dh.d      = DH(2);
-    dh.a      = DH(0);
-    dh.alpha  = DH(1);
-    return out << dh.D().matrix();
-
-    // const auto      ct = std::cos(DH(3)), st = std::sin(DH(3));
-    // const auto      ca = std::cos(DH(1)), sa = std::sin(DH(1));
-    // const auto      a  = DH(0), d = DH(2);
-    // Eigen::Matrix4d A;
-    // A << ct, -st*ca,  st*sa, ct*a,
-    //      st,  ct*ca, -ct*sa, st*a,
-    //       0,     sa,     ca,    d,
-    //       0,      0,      0,    1;
-    // return A;
+               << "\n-- U --\n" << dh.U.matrix()
+               << "\n-- D --\n" << dh.D().matrix()
+               << "\n-- S --\n" << dh.S().matrix();
 }
 }
 
@@ -150,12 +126,13 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
                          const std::vector<std::string>& tip_frames,
                          double search_discretization)
 {
+    using namespace Eigen;
     using namespace moveit::core;
 
     std::cerr << std::fixed;
 
     RCLCPP_INFO_STREAM(LOGGER,
-                       "quik_ik initialized: group_name=" << group_name
+                       "initialize quik_ik: group_name=" << group_name
                        << ", base_frame=" << base_frame
                        << ", tip_frames=[" << tip_frames << ']');
 
@@ -197,30 +174,24 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
         return false;
     }
 
-    dh_params_t         DH(joint_names_.size(), 4);
-    link_types_t        link_types(joint_names_.size());
-    vector_t            qsigns(joint_names_.size());
-    transform_t         T = transform_t::Identity();
-    transform_t         Tbase = transform_t::Identity();
-    vector3_t           ip = vector3_t::Zero(), kp = vector3_t::Zero();
-    double              mu = 0.0;
-    ssize_t             joint_num = 0;
+    Array<double, Dynamic, 4>   DH(joint_names_.size(), 4);
+    VectorX<link_type_t>        link_types(joint_names_.size());
+    VectorXd                    qsigns(joint_names_.size());
+    auto                        T = Isometry3d::Identity();
+    auto                        Tbase = Isometry3d::Identity();
+    Vector3d                    ip = Vector3d::Zero(), kp = Vector3d::Zero();
+    double                      mu = 0.0;
+    ssize_t                     joint_num = 0;
 
-    DH.setZero();
     for (const auto joint : jmg->getJointModels())
     {
-        const auto* child_link = joint->getChildLinkModel();
-
+        const auto      child_link = joint->getChildLinkModel();
+        T = T * child_link->getJointOriginTransform();
+#if defined(DEBUG)
         std::cerr << "\n### [" << joint_num
                   << "] joint_name=" << joint->getName()
-                  << ", child_link=" << child_link->getName() << std::endl;
-
-        std::cerr << "  Tlocal=" << child_link->getJointOriginTransform()
-                  << std::endl;
-
-        T = T * child_link->getJointOriginTransform();
-        std::cerr << "  T     =" << T << std::endl;
-
+                  << "\n  T =" << T << std::endl;
+#endif
         switch (joint->getType())
         {
           case JointModel::REVOLUTE:
@@ -251,8 +222,10 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
               //   column_3 = theta0: parent joint reference position
                 try
                 {
-                    const auto dh = computeDHParam(k, kp, ip, T, mu);
+                    const auto dh = computeDHParam(k, kp, ip, mu, T);
+#if defined(DEBUG)
                     std::cerr << "  dh: " << dh << std::endl;
+#endif
                     DH(joint_num-1, 0) = dh.a;
                     DH(joint_num-1, 1) = dh.alpha;
                     DH(joint_num-1, 2) = dh.d;
@@ -283,41 +256,42 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
 
     DH(joint_num-1, 0) = 0.0;
     DH(joint_num-1, 1) = 0.0;
-    DH(joint_num-1, 2) = 0.0;
+    DH(joint_num-1, 2) = -mu;
     DH(joint_num-1, 3) = 0.0;
 
-    transform_t S;
+    Isometry3d S;
     S.linear().col(0) = ip;
     S.linear().col(1) = kp.cross(ip);
     S.linear().col(2) = kp;
-    S.translation()   = mu * kp;
+    S.translation()   = Vector3d::Zero();
     S_.push_back(S);
 
-    std::cerr << "\n### DH: [a, alpha, d, theta] ###\n" << DH << std::endl;
-    std::cerr << "Tbase=" << Tbase << std::endl;
-    std::cerr << "Ttool=" << T << std::endl;
-
-    for (ssize_t j = 0; j < DH.rows(); ++j)
-        std::cerr << "-- [" << j << "] " << joint_names_[j] << " --\n"
-                  << DH.row(j) << std::endl;
-
+    T = S.inverse() * T;
+#if defined(DEBUG)
+    std::cerr << "\n### DH: [a, alpha, d, theta] ###\n" << DH
+              << "\nTbase=" << Tbase << "\nTtool=" << T << std::endl;
+#endif
+  // Create a link structure in Denevit-Hartenburg(DH) form.
     robot_ = make_shared<robot_t>(DH, link_types, qsigns,
                                   Tbase.matrix(), T.matrix());
 
-    std::cerr << "joint_names=" << getJointNames() << std::endl;
-    std::cerr << "link_names=" << getLinkNames() << std::endl;
+    RCLCPP_INFO_STREAM(LOGGER,
+                       "quik_ik successfully initialized: joint_names="
+                       << getJointNames() << ", link_names="
+                       << getLinkNames());
 
     return true;
 }
 
 QuikIKPlugin::dh_param_t
-QuikIKPlugin::computeDHParam(const vector3_t& k, const vector3_t& kp,
-                             const vector3_t& ip,
-                             const transform_t& T, double mu) const
+QuikIKPlugin::computeDHParam(const Eigen::Vector3d& k,
+                             const Eigen::Vector3d& kp,
+                             const Eigen::Vector3d& ip, double mu,
+                             const Eigen::Isometry3d& T) const
 {
     const auto  t  = T.translation();  // Translation from parent to child link
     const auto  kc = T.linear() * k;   // Transform into parent joint frame.
-    auto        ic = kp.cross(kc);     // Parent link direction.
+    auto        ic = kp.cross(kc);     // Child link direction in parent frame.
 
     dh_param_t  dh;
 
@@ -326,7 +300,7 @@ QuikIKPlugin::computeDHParam(const vector3_t& k, const vector3_t& kp,
         ic = t - t.dot(kp) * kp;       // 'ic' is a vertical component of 't'.
         l  = ic.norm();
 
-        if (l < 0.0001)               // Is 't' parallel to 'k'?
+        if (l < 0.0001)                // Is 't' parallel to 'k'?
             throw std::runtime_error("Invalid link structure: two adjacent axes are colinear.");
 
         ic /= l;
@@ -338,10 +312,16 @@ QuikIKPlugin::computeDHParam(const vector3_t& k, const vector3_t& kp,
     else
     {
         ic /= l;
-        dh.a     = t.dot(ic);
         dh.alpha = std::asin(l);
-        dh.d     = t.dot(kc.cross(ic)) / l - mu;
-        dh.mu    = t.dot(kp.cross(ic)) / l;
+
+        Eigen::Matrix3d A;
+        A.col(0) = ic;
+        A.col(1) = -kc;
+        A.col(2) = kp;
+        const auto      x = A.colPivHouseholderQr().solve(t);
+        dh.a  = x(0);
+        dh.d  = x(2) - mu;
+        dh.mu = x(1);
     }
 
     if (ip.dot(ip) < 0.01)              // Is 'kp' the first active joint?
@@ -359,12 +339,14 @@ QuikIKPlugin::computeDHParam(const vector3_t& k, const vector3_t& kp,
     dh.U.linear().col(2) = kp;
     dh.U.translation()   = mu * kp;
 
+  // Transfrom child link direction into child joint frame.
     dh.ip = T.linear().transpose() * ic;
-
+#if defined(DEBUG)
     std::cerr << "  kp=" << kp.transpose() << ", ip=" << ip.transpose()
               << ",\n  kc=" << kc.transpose() << ", ic="  <<  ic.transpose()
               << ",\n  t=" << t.transpose()
               << std::endl;
+#endif
     return dh;
 }
 
@@ -383,6 +365,8 @@ QuikIKPlugin::getPositionFKQuik(const std::vector<std::string>& link_names,
                                 const std::vector<double>& joint_angles,
                                 std::vector<pose_t>& poses) const
 {
+    using namespace Eigen;
+    
     RCLCPP_WARN_STREAM(LOGGER, "### BEGIN: getPositionFKQuik() [base_frame="
                        << getBaseFrame() << ']');
 
@@ -392,8 +376,9 @@ QuikIKPlugin::getPositionFKQuik(const std::vector<std::string>& link_names,
         return false;
     }
 
-    Eigen::Matrix<double, Eigen::Dynamic, 4> T(4*(robot_->dof + 1), 4);
-    robot_->FK(map_t(joint_angles.data(), ssize_t(joint_angles.size())), T);
+    Matrix<double, Dynamic, 4> T(4*(robot_->dof + 1), 4);
+    robot_->FK(Map<const VectorXd>(joint_angles.data(),
+                                   ssize_t(joint_angles.size())), T);
 
     poses.clear();
     for (const auto& link_name : link_names)
@@ -409,12 +394,14 @@ QuikIKPlugin::getPositionFKQuik(const std::vector<std::string>& link_names,
 
         const auto  Tdh = T.template middleRows<4>(4*idx);
         const auto& S   = S_[idx];
-        // std::cerr << "### [" << idx << "] link_name=" << link_name
-        //           << "\n -- Tdh --\n" << Tdh
-        //           << "\n -- S --\n" << S.matrix()
-        //           << std::endl;
-        vector4_t   orientation;
-        vector3_t   position;
+#if defined(DEBUG)
+        std::cerr << "### [" << idx << "] link_name=" << link_name
+                  << "\n -- Tdh --\n" << Tdh
+                  << "\n -- S --\n" << S.matrix()
+                  << std::endl;
+#endif
+        Vector4d orientation;
+        Vector3d position;
         quik::geometry::hgt2quatpos((Tdh * S.inverse()).matrix(),
                                     orientation, position);
 
@@ -427,10 +414,16 @@ QuikIKPlugin::getPositionFKQuik(const std::vector<std::string>& link_names,
         pose.orientation.z = orientation.z();
         pose.orientation.w = orientation.w();
         poses.push_back(pose);
-
+#if defined(DEBUG)
         std::cerr << " " << link_name << ": " << pose << std::endl;
+#endif
     }
 
+    Isometry3d    Teef;
+    Teef.matrix() = T.template middleRows<4>(4*robot_->dof);
+#if defined(DEBUG)
+    std::cerr << " end_effector: " << Teef << std::endl;
+#endif
     return true;
 }
 
@@ -439,7 +432,7 @@ QuikIKPlugin::getPositionFKMoveIt(const std::vector<std::string>& link_names,
                                   const std::vector<double>& joint_angles,
                                   std::vector<pose_t>& poses) const
 {
-    RCLCPP_WARN_STREAM(LOGGER, "### BEGIN: getPositionFKMoveIt()");
+    RCLCPP_DEBUG_STREAM(LOGGER, "### BEGIN: getPositionFKMoveIt()");
 
   // Set joint angles to the robot state
     robot_state_t robot_state(robot_model_);
@@ -457,7 +450,9 @@ QuikIKPlugin::getPositionFKMoveIt(const std::vector<std::string>& link_names,
         const auto pose = tf2::toMsg(Tb0 * robot_state.getGlobalLinkTransform(
                                                link_name));
         poses.push_back(pose);
+#if defined(DEBUG)
         std::cerr << "  " << link_name << ": " << pose << std::endl;
+#endif
     }
 
     return true;
@@ -470,7 +465,7 @@ QuikIKPlugin::getPositionIK(const pose_t& ik_pose,
                             error_code_t& error_code,
                             const options_t& options) const
 {
-    RCLCPP_WARN_STREAM(LOGGER, "### BEGIN: getPositionIK()");
+    RCLCPP_DEBUG_STREAM(LOGGER, "### BEGIN: getPositionIK()");
 
     const IKCallbackFn  solution_callback = nullptr;
     std::vector<double> consistency_limits;
@@ -497,7 +492,7 @@ QuikIKPlugin::searchPositionIK(const std::vector<pose_t>& ik_poses,
                                const options_t& options,
                                const robot_state_t* context_state) const
 {
-    RCLCPP_WARN_STREAM(LOGGER, "### BEGIN: searchPositionIK()");
+    RCLCPP_DEBUG_STREAM(LOGGER, "### BEGIN: searchPositionIK()");
 
     if (!robot_)
     {
@@ -508,15 +503,16 @@ QuikIKPlugin::searchPositionIK(const std::vector<pose_t>& ik_poses,
 
     (void)context_state;  // not used
 
-    std::vector<pose_t> poses;
-    getPositionFKQuik(link_names_, ik_seed_state, poses);
-    getPositionFKMoveIt(link_names_, ik_seed_state, poses);
+  //   std::vector<pose_t> poses;
+  //   getPositionFKQuik(link_names_, ik_seed_state, poses);
+  //   getPositionFKMoveIt(link_names_, ik_seed_state, poses);
 
-  // DEBUG CODE
-    return false;
+  // // DEBUG CODE
+  //   return false;
 
     try
     {
+        using namespace Eigen;
         using break_reason_t = quik::BREAKREASON_t;
 
         if (int(ik_seed_state.size()) != robot_->dof)
@@ -526,41 +522,44 @@ QuikIKPlugin::searchPositionIK(const std::vector<pose_t>& ik_poses,
                                      + std::to_string(robot_->dof)
                                      + "]!");
 
-        const auto     params = param_listener_->get_params();
-        const solver_t solver(robot_,
-                              int(params.max_iterations),
-                              quik::str2algorithm(params.algorithm),
-                              params.exit_tolerance,
-                              params.minimum_step_size,
-                              params.relative_improvement_tolerance,
-                              int(params.max_consecutive_grad_fails),
-                              int(params.max_gradient_fails),
-                              params.lambda_squared,
-                              params.max_linear_step_size,
-                              params.max_angular_step_size,
-                              params.armijo_sigma,
-                              params.armijo_beta);
-        const map_t    q0(ik_seed_state.data(), ssize_t(ik_seed_state.size()));
-        bool           found = false;
+        const auto                params = param_listener_->get_params();
+        const solver_t            solver(robot_,
+                                         int(params.max_iterations),
+                                         quik::str2algorithm(params.algorithm),
+                                         params.exit_tolerance,
+                                         params.minimum_step_size,
+                                         params.relative_improvement_tolerance,
+                                         int(params.max_consecutive_grad_fails),
+                                         int(params.max_gradient_fails),
+                                         params.lambda_squared,
+                                         params.max_linear_step_size,
+                                         params.max_angular_step_size,
+                                         params.armijo_sigma,
+                                         params.armijo_beta);
+        const Map<const VectorXd> q0(ik_seed_state.data(),
+                                     ssize_t(ik_seed_state.size()));
+        bool                      found = false;
 
-        RCLCPP_WARN_STREAM(LOGGER, "  q0=" << q0.transpose());
+        RCLCPP_DEBUG_STREAM(LOGGER, "q0=" << q0.transpose());
 
         for (const auto& ik_pose : ik_poses)
         {
-            const vector4_t orientation(ik_pose.orientation.x,
-                                        ik_pose.orientation.y,
-                                        ik_pose.orientation.z,
-                                        ik_pose.orientation.w);
-            const vector3_t position(ik_pose.position.x,
-                                     ik_pose.position.y,
-                                     ik_pose.position.z);
-            vector_t        q(q0.size());
-            vector6_t       e;
-            int             iter;
-            break_reason_t  break_reason;
+            const Vector4d    orientation(ik_pose.orientation.x,
+                                          ik_pose.orientation.y,
+                                          ik_pose.orientation.z,
+                                          ik_pose.orientation.w);
+            const Vector3d    position(ik_pose.position.x,
+                                       ik_pose.position.y,
+                                       ik_pose.position.z);
+            VectorXd          q(q0.size());
+            Vector<double, 6> e;
+            int               iter;
+            break_reason_t    break_reason;
 
-            RCLCPP_WARN_STREAM(LOGGER, "  desired position   =" << position.transpose());
-            RCLCPP_WARN_STREAM(LOGGER, "  desired orientation=" << orientation.transpose());
+            RCLCPP_DEBUG_STREAM(LOGGER, "desired position   ="
+                                << position.transpose());
+            RCLCPP_DEBUG_STREAM(LOGGER, "desired orientation="
+                                << orientation.transpose());
 
             solver.IK(orientation, position, q0, q, e, iter, break_reason);
 
@@ -588,8 +587,6 @@ QuikIKPlugin::searchPositionIK(const std::vector<pose_t>& ik_poses,
         RCLCPP_ERROR_STREAM(LOGGER, "searchPositionIK(): " << err.what());
         return false;
     }
-
-    RCLCPP_WARN_STREAM(LOGGER, "### END:   searchPositionIK()");
 
     return true;
 }
@@ -694,7 +691,7 @@ QuikIKPlugin::searchPositionIK(const std::vector<pose_t>& ik_poses,
 }
 
 bool
-QuikIKPlugin::withinLimits(const vector_t& q) const
+QuikIKPlugin::withinLimits(const Eigen::VectorXd& q) const
 {
     robot_state_t       robot_state(robot_model_);
     robot_state.setToDefaultValues();

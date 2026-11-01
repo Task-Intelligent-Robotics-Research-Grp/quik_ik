@@ -1,0 +1,9 @@
+name: lyrical-build
+on: push
+
+jobs:
+  jazzy-build:
+    uses: ./.github/workflows/build.yaml
+    with:
+      os: ubuntu-26.04
+      ros_distro: lyrical

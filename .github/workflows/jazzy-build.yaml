@@ -1,0 +1,9 @@
+name: jazzy-build
+on: push
+
+jobs:
+  jazzy-build:
+    uses: ./.github/workflows/build.yaml
+    with:
+      os: ubuntu-24.04
+      ros_distro: jazzy
