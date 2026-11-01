@@ -2,7 +2,7 @@ name: lyrical-build
 on: push
 
 jobs:
-  jazzy-build:
+  lyrical-build:
     uses: ./.github/workflows/build.yaml
     with:
       os: ubuntu-26.04
