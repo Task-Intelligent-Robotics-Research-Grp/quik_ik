@@ -1,36 +1,10 @@
-// BSD 3-Clause License
-//
-// Copyright (c) 2023, National Institute of Industrial Science
-// and Technology(AIST)
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are met:
-//
-// 1. Redistributions of source code must retain the above copyright notice,
-//    this list of conditions and the following disclaimer.
-//
-// 2. Redistributions in binary form must reproduce the above copyright notice,
-//    this list of conditions and the following disclaimer in the documentation
-//    and/or other materials provided with the distribution.
-//
-// 3. Neither the name of the copyright holder nor the names of its
-//    contributors may be used to endorse or promote products derived from
-//    this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
-// AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
-// IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
-// ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS
-// BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY,
-// OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT
-// OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-// OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE
-// OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE,
-// EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
-// Author: Toshio Ueshiba (t.ueshiba@aist.go.jp)
-//
+/**
+ * @file quik_ik_plugin.cpp
+ * @author Toshio Ueshiba (t.ueshiba@aist.go.jp)
+ * @date 2026-11-2
+ * @brief 
+ * @copyright Copyright (c) 2026
+ */
 #define DEBUG
 
 #include <quik_ik/quik_ik_parameters.hpp>
@@ -304,7 +278,7 @@ QuikIKPlugin::computeDHParam(const Eigen::Vector3d& k,
             throw std::runtime_error("Invalid link structure: two adjacent axes are colinear.");
 
         ic /= l;
-        dh.a     = t.dot(ic);
+        dh.a     = l;
         dh.alpha = 0.0;
         dh.d     = -mu;
         dh.mu    = -t.dot(kc);
@@ -316,12 +290,12 @@ QuikIKPlugin::computeDHParam(const Eigen::Vector3d& k,
 
         Eigen::Matrix3d A;
         A.col(0) = ic;
-        A.col(1) = -kc;
-        A.col(2) = kp;
+        A.col(1) = kp;
+        A.col(2) = kc;
         const auto      x = A.colPivHouseholderQr().solve(t);
-        dh.a  = x(0);
-        dh.d  = x(2) - mu;
-        dh.mu = x(1);
+        dh.a  =  x(0);
+        dh.d  =  x(1) - mu;
+        dh.mu = -x(2);
     }
 
     if (ip.dot(ip) < 0.01)              // Is 'kp' the first active joint?
