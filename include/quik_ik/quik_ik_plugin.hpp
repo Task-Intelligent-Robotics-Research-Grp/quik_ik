@@ -2,7 +2,7 @@
  * @file quik_ik_plugin.hpp
  * @author Toshio Ueshiba (t.ueshiba@aist.go.jp)
  * @date 2026-11-2
- * @brief 
+ * @brief Header file of QuikIKPlugin class
  * @copyright Copyright (c) 2026
  */
 #pragma once
@@ -23,15 +23,9 @@ class QuikIKPlugin : public kinematics::KinematicsBase
 {
   private:
     using pose_t        = geometry_msgs::msg::Pose;
-    using robot_model_t = moveit::core::RobotModel;
-    using robot_state_t = moveit::core::RobotState;
-    using link_model_t  = moveit::core::LinkModel;
     using error_code_t  = moveit_msgs::msg::MoveItErrorCodes;
     using options_t     = kinematics::KinematicsQueryOptions;
-
-    using robot_t       = quik::Robot<>;
-    using solver_t      = quik::IKSolver<>;
-    using link_type_t   = quik::JOINTTYPE_t;
+    using robot_state_t = moveit::core::RobotState;
 
   public:
     struct dh_param_t
@@ -67,7 +61,7 @@ class QuikIKPlugin : public kinematics::KinematicsBase
     const std::vector<std::string>& getLinkNames()              const   ;
 
     bool initialize(const rclcpp::Node::SharedPtr& node,
-                    const robot_model_t& robot_model,
+                    const moveit::core::RobotModel& robot_model,
                     const std::string& group_name,
                     const std::string& base_frame,
                     const std::vector<std::string>& tip_frames,
@@ -157,6 +151,6 @@ class QuikIKPlugin : public kinematics::KinematicsBase
     std::vector<std::string>            joint_names_;
     std::vector<std::string>            link_names_;
     std::vector<Eigen::Isometry3d>      S_;
-    std::shared_ptr<robot_t>            robot_;
+    std::shared_ptr<quik::Robot<> >     robot_;
 };
 }  // namespace quik_ik

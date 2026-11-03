@@ -2,7 +2,7 @@
  * @file quik_ik_plugin.cpp
  * @author Toshio Ueshiba (t.ueshiba@aist.go.jp)
  * @date 2026-11-2
- * @brief 
+ * @brief Implementation of QuikIKPlugin class
  * @copyright Copyright (c) 2026
  */
 #define DEBUG
@@ -12,18 +12,17 @@
 
 #include <pluginlib/class_list_macros.hpp>
 #include <rclcpp/rclcpp.hpp>
-
-#include <chrono>
 #include <moveit/robot_model/joint_model_group.hpp>
 #include <moveit/robot_state/robot_state.hpp>
-#include <string>
-#include <vector>
 #include <tf2_eigen/tf2_eigen.hpp>
 
 namespace quik_ik
 {
 namespace
 {
+/************************************************************************
+*  static variables and functions                                       *
+************************************************************************/
 const auto LOGGER = rclcpp::get_logger("quik_ik");
 
 template <class T> std::ostream&
@@ -94,7 +93,7 @@ QuikIKPlugin::getLinkNames() const
 
 bool
 QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
-                         const robot_model_t& robot_model,
+                         const moveit::core::RobotModel& robot_model,
                          const std::string& group_name,
                          const std::string& base_frame,
                          const std::vector<std::string>& tip_frames,
@@ -149,7 +148,7 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
     }
 
     Array<double, Dynamic, 4>   DH(joint_names_.size(), 4);
-    VectorX<link_type_t>        link_types(joint_names_.size());
+    VectorX<quik::JOINTTYPE_t>  link_types(joint_names_.size());
     VectorXd                    qsigns(joint_names_.size());
     auto                        T = Isometry3d::Identity();
     auto                        Tbase = Isometry3d::Identity();
@@ -237,7 +236,7 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
     S.linear().col(0) = ip;
     S.linear().col(1) = kp.cross(ip);
     S.linear().col(2) = kp;
-    S.translation()   = Vector3d::Zero();
+    S.translation()     = Vector3d::Zero();
     S_.push_back(S);
 
     T = S.inverse() * T;
@@ -246,8 +245,8 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
               << "\nTbase=" << Tbase << "\nTtool=" << T << std::endl;
 #endif
   // Create a link structure in Denevit-Hartenburg(DH) form.
-    robot_ = make_shared<robot_t>(DH, link_types, qsigns,
-                                  Tbase.matrix(), T.matrix());
+    robot_ = make_shared<quik::Robot<> >(DH, link_types, qsigns,
+                                         Tbase.matrix(), T.matrix());
 
     RCLCPP_INFO_STREAM(LOGGER,
                        "quik_ik successfully initialized: joint_names="
@@ -497,7 +496,7 @@ QuikIKPlugin::searchPositionIK(const std::vector<pose_t>& ik_poses,
                                      + "]!");
 
         const auto                params = param_listener_->get_params();
-        const solver_t            solver(robot_,
+        const quik::IKSolver<>    solver(robot_,
                                          int(params.max_iterations),
                                          quik::str2algorithm(params.algorithm),
                                          params.exit_tolerance,
