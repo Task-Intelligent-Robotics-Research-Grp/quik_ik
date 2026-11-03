@@ -275,13 +275,14 @@ QuikIKPlugin::computeDHParam(const Eigen::Vector3d& k,
 {
     using namespace Eigen;
     
-    const auto  t  = T.translation();  // Translation from parent to child link
-    const auto  kc = T.linear() * k;   // Transform into parent joint frame.
-    auto        ic = kp.cross(kc);     // Child link direction in parent frame.
-    auto        l  = ic.norm();
+    const auto t   = T.translation();  // Translation from parent to child link
+    const auto kc  = T.linear() * k;   // Transform child axis to parent frame
+    auto       ic  = kp.cross(kc);     // Child link direction in parent frame
+    const auto c   = kp.dot(kc);
+    const auto det = (1.0 + c) * (1.0 - c);
     
-    dh_param_t  dh;
-    dh.alpha = std::asin(l);
+    dh_param_t dh;
+    dh.alpha = std::asin(std::sqrt(det));
     
     if (l < 0.01)  // Is 'kc' parallel to 'kp'?
     {
@@ -290,20 +291,15 @@ QuikIKPlugin::computeDHParam(const Eigen::Vector3d& k,
 
         if (l < 0.0001)                // Is 't' parallel to 'k'?
             throw std::runtime_error("Invalid link structure: two adjacent axes are colinear.");
+    }
 
-        dh.d  = -mu;
-        dh.mu = -t.dot(kc);
-    }
-    else
-    {
-        const auto c = kp.dot(kc);
-        Matrix2d   A;
-        A << 1.0, -c, -c, 1.0;
-        Vector2d   b(kp.dot(t), -kc.dot(t));
-        const auto x = A.colPivHouseholderQr().solve(b);
-        dh.d  = x(0) - mu;
-        dh.mu = x(1);
-    }
+    const auto w = std::exp(-param_listener_->get_params().dh_weight * det);
+    Matrix2d   A;
+    A << 1.0 + w, -c, -c, 1.0;
+    Vector2d   b(kp.dot(t), -kc.dot(t));
+    const auto x = A.colPivHouseholderQr().solve(b);
+    dh.d  = x(0) - mu;
+    dh.mu = x(1);
 
     ic /= l;
     dh.a = ic.dot(t);
