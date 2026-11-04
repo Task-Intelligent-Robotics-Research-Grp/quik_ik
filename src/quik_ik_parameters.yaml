@@ -1,11 +1,11 @@
 quik_ik:
   dh_weight: {
     type:          double,
-    default_value: 1.0e-6,
+    default_value: 16000.0,
     description:   "Weight value for regularizing singular configuration, i.e. parallel adjacent joint axes, in computing DH parameters.",
     validation: {
       gt_eq<>: [0.0],
-      lt<>:    [0.01],
+      lt<>:    [300000.0],
     }
   }  
   max_iterations: {

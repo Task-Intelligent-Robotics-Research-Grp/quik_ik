@@ -5,16 +5,15 @@
  * @brief Implementation of QuikIKPlugin class
  * @copyright Copyright (c) 2026
  */
-#define DEBUG
-
 #include <quik_ik/quik_ik_parameters.hpp>
 #include <quik_ik/quik_ik_plugin.hpp>
-
 #include <pluginlib/class_list_macros.hpp>
 #include <rclcpp/rclcpp.hpp>
 #include <moveit/robot_model/joint_model_group.hpp>
 #include <moveit/robot_state/robot_state.hpp>
 #include <tf2_eigen/tf2_eigen.hpp>
+
+#define DEBUG
 
 namespace quik_ik
 {
@@ -130,8 +129,8 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
     const auto  jmg = robot_model_->getJointModelGroup(group_name);
     if (!jmg)
     {
-        RCLCPP_ERROR_STREAM(LOGGER,
-                            "failed to get joint model group " << group_name);
+        RCLCPP_ERROR_STREAM(LOGGER, "failed to get joint model group["
+                            << group_name << ']');
         return false;
     }
 
@@ -277,32 +276,26 @@ QuikIKPlugin::computeDHParam(const Eigen::Vector3d& k,
     
     const auto t   = T.translation();  // Translation from parent to child link
     const auto kc  = T.linear() * k;   // Transform child axis to parent frame
-    auto       ic  = kp.cross(kc);     // Child link direction in parent frame
     const auto c   = kp.dot(kc);
     const auto det = (1.0 + c) * (1.0 - c);
     
     dh_param_t dh;
     dh.alpha = std::asin(std::sqrt(det));
     
-    if (l < 0.01)  // Is 'kc' parallel to 'kp'?
-    {
-        ic = t - t.dot(kp) * kp;       // 'ic' is a vertical component of 't'.
-        l  = ic.norm();
-
-        if (l < 0.0001)                // Is 't' parallel to 'k'?
-            throw std::runtime_error("Invalid link structure: two adjacent axes are colinear.");
-    }
-
     const auto w = std::exp(-param_listener_->get_params().dh_weight * det);
     Matrix2d   A;
     A << 1.0 + w, -c, -c, 1.0;
     Vector2d   b(kp.dot(t), -kc.dot(t));
-    const auto x = A.colPivHouseholderQr().solve(b);
+    const auto x  = A.colPivHouseholderQr().solve(b);
+    const auto ix = kp.cross(kc);       // Child link direction in parent frame
+    Vector3d   ic = t - x(0)*kp + x(1)*kc;
+    dh.a  = ic.norm();
     dh.d  = x(0) - mu;
     dh.mu = x(1);
-
-    ic /= l;
-    dh.a = ic.dot(t);
+    if (std::abs(ix.dot(t)) < dh.a)
+        ic /= dh.a;
+    else
+        ic = ix.normalized();
 
     if (ip.dot(ip) < 0.01)              // Is 'kp' the first active joint?
     {
