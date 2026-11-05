@@ -136,21 +136,23 @@ class QuikIKPlugin : public kinematics::KinematicsBase
                                const Eigen::Vector3d& kp,
                                double mu,
                                const Eigen::Isometry3d& T)      const   ;
+
     bool        getPositionFKQuik(const std::vector<std::string>& link_names,
                                   const std::vector<double>& joint_angles,
                                   std::vector<pose_t>& poses)   const   ;
+
     bool        getPositionFKMoveIt(const std::vector<std::string>& link_names,
                                     const std::vector<double>& joint_angles,
                                     std::vector<pose_t>& poses) const   ;
+
     bool        withinLimits(const Eigen::VectorXd& q)          const   ;
 
   private:
-    rclcpp::Node::SharedPtr             node_;
-    std::shared_ptr<ParamListener>      param_listener_;
-
-    std::vector<std::string>            joint_names_;
-    std::vector<std::string>            link_names_;
-    std::vector<Eigen::Isometry3d>      S_;
-    std::shared_ptr<quik::Robot<> >     robot_;
+    rclcpp::Node::SharedPtr         node_;
+    std::shared_ptr<ParamListener>  param_listener_;
+    std::vector<std::string>        joint_names_;
+    std::vector<std::string>        link_names_;
+    std::vector<Eigen::Isometry3d>  S_;  // transforms from DH to MoveIt space
+    std::shared_ptr<quik::Robot<> > robot_;
 };
 }  // namespace quik_ik

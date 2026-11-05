@@ -266,63 +266,6 @@ QuikIKPlugin::initialize(const rclcpp::Node::SharedPtr& node,
     return true;
 }
 
-QuikIKPlugin::dh_param_t
-QuikIKPlugin::computeDHParam(const Eigen::Vector3d& k,
-                             const Eigen::Vector3d& kp,
-                             const Eigen::Vector3d& ip, double mu,
-                             const Eigen::Isometry3d& T) const
-{
-    using namespace Eigen;
-    
-    const auto t   = T.translation();  // Translation from parent to child link
-    const auto kc  = T.linear() * k;   // Transform child axis to parent frame
-    const auto c   = kp.dot(kc);
-    const auto det = (1.0 + c) * (1.0 - c);
-    
-    dh_param_t dh;
-    dh.alpha = std::asin(std::sqrt(det));
-    
-    const auto w = std::exp(-param_listener_->get_params().dh_weight * det);
-    Matrix2d   A;
-    A << 1.0 + w, -c, -c, 1.0;
-    Vector2d   b(kp.dot(t), -kc.dot(t));
-    const auto x  = A.colPivHouseholderQr().solve(b);
-    const auto ix = kp.cross(kc);       // Child link direction in parent frame
-    Vector3d   ic = t - x(0)*kp + x(1)*kc;
-    dh.a  = ic.norm();
-    dh.d  = x(0) - mu;
-    dh.mu = x(1);
-    if (std::abs(ix.dot(t)) < dh.a)
-        ic /= dh.a;
-    else
-        ic = ix.normalized();
-
-    if (ip.dot(ip) < 0.01)              // Is 'kp' the first active joint?
-    {
-        dh.theta0 = 0.0;
-        dh.U.linear().col(0) = ic;
-    }
-    else
-    {
-        dh.theta0 = std::acos(ip.dot(ic));
-        dh.U.linear().col(0) = ip;
-    }
-
-    dh.U.linear().col(1) = kp.cross(dh.U.linear().col(0));
-    dh.U.linear().col(2) = kp;
-    dh.U.translation()   = mu * kp;
-
-  // Transfrom child link direction into child joint frame.
-    dh.ip = T.linear().transpose() * ic;
-#if defined(DEBUG)
-    std::cerr << "  kp=" << kp.transpose() << ", ip=" << ip.transpose()
-              << ",\n  kc=" << kc.transpose() << ", ic="  <<  ic.transpose()
-              << ",\n  t=" << t.transpose()
-              << std::endl;
-#endif
-    return dh;
-}
-
 bool
 QuikIKPlugin::getPositionFK(const std::vector<std::string>& link_names,
                                   const std::vector<double>& joint_angles,
@@ -331,99 +274,6 @@ QuikIKPlugin::getPositionFK(const std::vector<std::string>& link_names,
     RCLCPP_WARN_STREAM(LOGGER, "### BEGIN: getPositionFK()");
 
     return false;
-}
-
-bool
-QuikIKPlugin::getPositionFKQuik(const std::vector<std::string>& link_names,
-                                const std::vector<double>& joint_angles,
-                                std::vector<pose_t>& poses) const
-{
-    using namespace Eigen;
-    
-    RCLCPP_WARN_STREAM(LOGGER, "### BEGIN: getPositionFKQuik() [base_frame="
-                       << getBaseFrame() << ']');
-
-    if (!robot_)
-    {
-        RCLCPP_ERROR_STREAM(LOGGER, "kinematics not active");
-        return false;
-    }
-
-    Matrix<double, Dynamic, 4> T(4*(robot_->dof + 1), 4);
-    robot_->FK(Map<const VectorXd>(joint_angles.data(),
-                                   ssize_t(joint_angles.size())), T);
-
-    poses.clear();
-    for (const auto& link_name : link_names)
-    {
-        const auto idx = std::find(link_names_.cbegin(), link_names_.cend(),
-                                   link_name) - link_names_.cbegin();
-        if (size_t(idx) >= link_names.size())
-        {
-            RCLCPP_ERROR_STREAM(LOGGER, "getPositionFK(): unknown link name["
-                                << link_name);
-            return false;
-        }
-
-        const auto  Tdh = T.template middleRows<4>(4*idx);
-        const auto& S   = S_[size_t(idx)];
-#if defined(DEBUG)
-        // std::cerr << "### [" << idx << "] link_name=" << link_name
-        //           << "\n -- Tdh --\n" << Tdh
-        //           << "\n -- S --\n" << S.matrix()
-        //           << std::endl;
-#endif
-        Vector4d orientation;
-        Vector3d position;
-        quik::geometry::hgt2quatpos((Tdh * S.inverse()).matrix(),
-                                    orientation, position);
-
-        pose_t pose;
-        pose.position.x    = position.x();
-        pose.position.y    = position.y();
-        pose.position.z    = position.z();
-        pose.orientation.x = orientation.x();
-        pose.orientation.y = orientation.y();
-        pose.orientation.z = orientation.z();
-        pose.orientation.w = orientation.w();
-        poses.push_back(pose);
-#if defined(DEBUG)
-        std::cerr << " " << link_name << ": " << pose << std::endl;
-#endif
-    }
-
-    return true;
-}
-
-bool
-QuikIKPlugin::getPositionFKMoveIt(const std::vector<std::string>& link_names,
-                                  const std::vector<double>& joint_angles,
-                                  std::vector<pose_t>& poses) const
-{
-    RCLCPP_WARN_STREAM(LOGGER, "### BEGIN: getPositionFKMoveIt()");
-
-  // Set joint angles to the robot state
-    robot_state_t robot_state(robot_model_);
-    robot_state.setToDefaultValues();
-    robot_state.setJointGroupPositions(group_name_, joint_angles);
-
-  // Get transform from root to base_link of the group.
-    const auto  Tb0 = robot_state.getGlobalLinkTransform(getBaseFrame())
-                                 .inverse();
-
-  // Get pose for each link
-    poses.clear();
-    for (const auto& link_name : link_names)
-    {
-        const auto pose = tf2::toMsg(Tb0 * robot_state.getGlobalLinkTransform(
-                                               link_name));
-        poses.push_back(pose);
-#if defined(DEBUG)
-        std::cerr << "  " << link_name << ": " << pose << std::endl;
-#endif
-    }
-
-    return true;
 }
 
 bool
@@ -656,6 +506,159 @@ QuikIKPlugin::searchPositionIK(const std::vector<pose_t>& ik_poses,
                             error_code,
                             options,
                             context_state);
+}
+
+/*
+ *  private functions
+ */
+QuikIKPlugin::dh_param_t
+QuikIKPlugin::computeDHParam(const Eigen::Vector3d& k,
+                             const Eigen::Vector3d& kp,
+                             const Eigen::Vector3d& ip, double mu,
+                             const Eigen::Isometry3d& T) const
+{
+    using namespace Eigen;
+    
+    const auto t   = T.translation();  // Translation from parent to child link
+    const auto kc  = T.linear() * k;   // Transform child axis to parent frame
+    const auto c   = kp.dot(kc);
+    const auto det = (1.0 + c) * (1.0 - c);
+    
+    dh_param_t dh;
+    dh.alpha = std::asin(std::sqrt(det));
+    
+    const auto w = std::exp(-param_listener_->get_params().dh_weight * det);
+    Matrix2d   A;
+    A << 1.0 + w, -c, -c, 1.0;
+    Vector2d   b(kp.dot(t), -kc.dot(t));
+    const auto x  = A.colPivHouseholderQr().solve(b);
+    const auto ix = kp.cross(kc);       // Child link direction in parent frame
+    Vector3d   ic = t - x(0)*kp + x(1)*kc;
+    dh.a  = ic.norm();
+    dh.d  = x(0) - mu;
+    dh.mu = x(1);
+    if (std::abs(ix.dot(t)) < dh.a)
+        ic /= dh.a;
+    else
+        ic = ix.normalized();
+
+    if (ip.dot(ip) < 0.01)              // Is 'kp' the first active joint?
+    {
+        dh.theta0 = 0.0;
+        dh.U.linear().col(0) = ic;
+    }
+    else
+    {
+        dh.theta0 = std::acos(ip.dot(ic));
+        dh.U.linear().col(0) = ip;
+    }
+
+    dh.U.linear().col(1) = kp.cross(dh.U.linear().col(0));
+    dh.U.linear().col(2) = kp;
+    dh.U.translation()   = mu * kp;
+
+  // Transfrom child link direction into child joint frame.
+    dh.ip = T.linear().transpose() * ic;
+#if defined(DEBUG)
+    std::cerr << "  kp=" << kp.transpose() << ", ip=" << ip.transpose()
+              << ",\n  kc=" << kc.transpose() << ", ic="  <<  ic.transpose()
+              << ",\n  t=" << t.transpose()
+              << std::endl;
+#endif
+    return dh;
+}
+
+bool
+QuikIKPlugin::getPositionFKQuik(const std::vector<std::string>& link_names,
+                                const std::vector<double>& joint_angles,
+                                std::vector<pose_t>& poses) const
+{
+    using namespace Eigen;
+    
+    RCLCPP_WARN_STREAM(LOGGER, "### BEGIN: getPositionFKQuik() [base_frame="
+                       << getBaseFrame() << ']');
+
+    if (!robot_)
+    {
+        RCLCPP_ERROR_STREAM(LOGGER, "kinematics not active");
+        return false;
+    }
+
+    Matrix<double, Dynamic, 4> T(4*(robot_->dof + 1), 4);
+    robot_->FK(Map<const VectorXd>(joint_angles.data(),
+                                   ssize_t(joint_angles.size())), T);
+
+    poses.clear();
+    for (const auto& link_name : link_names)
+    {
+        const auto idx = std::find(link_names_.cbegin(), link_names_.cend(),
+                                   link_name) - link_names_.cbegin();
+        if (size_t(idx) >= link_names.size())
+        {
+            RCLCPP_ERROR_STREAM(LOGGER, "getPositionFK(): unknown link name["
+                                << link_name);
+            return false;
+        }
+
+        const auto  Tdh = T.template middleRows<4>(4*idx);
+        const auto& S   = S_[size_t(idx)];
+#if defined(DEBUG)
+        // std::cerr << "### [" << idx << "] link_name=" << link_name
+        //           << "\n -- Tdh --\n" << Tdh
+        //           << "\n -- S --\n" << S.matrix()
+        //           << std::endl;
+#endif
+        Vector4d orientation;
+        Vector3d position;
+        quik::geometry::hgt2quatpos((Tdh * S.inverse()).matrix(),
+                                    orientation, position);
+
+        pose_t pose;
+        pose.position.x    = position.x();
+        pose.position.y    = position.y();
+        pose.position.z    = position.z();
+        pose.orientation.x = orientation.x();
+        pose.orientation.y = orientation.y();
+        pose.orientation.z = orientation.z();
+        pose.orientation.w = orientation.w();
+        poses.push_back(pose);
+#if defined(DEBUG)
+        std::cerr << " " << link_name << ": " << pose << std::endl;
+#endif
+    }
+
+    return true;
+}
+
+bool
+QuikIKPlugin::getPositionFKMoveIt(const std::vector<std::string>& link_names,
+                                  const std::vector<double>& joint_angles,
+                                  std::vector<pose_t>& poses) const
+{
+    RCLCPP_WARN_STREAM(LOGGER, "### BEGIN: getPositionFKMoveIt()");
+
+  // Set joint angles to the robot state
+    robot_state_t robot_state(robot_model_);
+    robot_state.setToDefaultValues();
+    robot_state.setJointGroupPositions(group_name_, joint_angles);
+
+  // Get transform from root to base_link of the group.
+    const auto  Tb0 = robot_state.getGlobalLinkTransform(getBaseFrame())
+                                 .inverse();
+
+  // Get pose for each link
+    poses.clear();
+    for (const auto& link_name : link_names)
+    {
+        const auto pose = tf2::toMsg(Tb0 * robot_state.getGlobalLinkTransform(
+                                               link_name));
+        poses.push_back(pose);
+#if defined(DEBUG)
+        std::cerr << "  " << link_name << ": " << pose << std::endl;
+#endif
+    }
+
+    return true;
 }
 
 bool
